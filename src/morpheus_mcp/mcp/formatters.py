@@ -25,7 +25,7 @@ def format_plan_summary(plan: PlanRecord, tasks: list[TaskRecord]) -> str:
 
     lines = [
         f"## Plan: {plan.name}",
-        f"**ID:** `{plan.id[:12]}`",
+        f"**ID:** `{plan.id}`",
         f"**Project:** {plan.project}",
         f"**Progress:** {done}/{total} tasks ({pct}%)",
         "",
