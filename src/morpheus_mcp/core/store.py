@@ -251,9 +251,15 @@ class MorpheusStore:
         ]
 
     def get_task(self, task_id: str) -> TaskRecord | None:
-        """Retrieve a single task by ID."""
+        """Retrieve a single task by ID or prefix (min 8 chars)."""
         cur = self.conn.execute("SELECT * FROM tasks WHERE id = ?", (task_id,))
         row = cur.fetchone()
+        if row is None and len(task_id) >= 8:
+            cur = self.conn.execute(
+                "SELECT * FROM tasks WHERE id LIKE ? LIMIT 1",
+                (task_id + "%",),
+            )
+            row = cur.fetchone()
         if row is None:
             return None
         return TaskRecord(

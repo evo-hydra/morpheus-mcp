@@ -38,10 +38,16 @@ def format_plan_summary(plan: PlanRecord, tasks: list[TaskRecord]) -> str:
             next_task_id = t.id
             break
 
+    lines.append("### Tasks")
+    lines.append("")
+    lines.append("| # | Task | ID | Status |")
+    lines.append("|---|------|----|--------|")
     for t in tasks:
         icon = _STATUS_ICONS.get(t.status, "?")
-        marker = "  <-- next" if t.id == next_task_id else ""
-        lines.append(f"  [{icon}] {t.seq}. {t.title}{marker}")
+        marker = " **<-- next**" if t.id == next_task_id else ""
+        lines.append(f"| {t.seq} | {t.title}{marker} | `{t.id[:12]}` | {icon} |")
+    lines.append("")
+    lines.append("*Use the `ID` column values for `morpheus_advance(task_id, ...)`*")
 
     if failed or skipped:
         lines.append("")

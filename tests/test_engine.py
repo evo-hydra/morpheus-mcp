@@ -142,21 +142,34 @@ class TestAdvance:
         store.save_plan(sample_plan_record)
         task = TaskRecord(plan_id=sample_plan_record.id, seq=1, title="T1")
         store.save_task(task)
+
+        # Must complete CHECK first (sequential enforcement)
+        advance(store, task.id, Phase.CHECK, {})
+
         result, phase = advance(store, task.id, Phase.CODE, {})
         assert result.passed is False
         assert phase is None
 
-        # Rejection is recorded
+        # Rejection is recorded (CHECK completed + CODE rejected = 2 phases)
         phases = store.get_phases(task.id)
-        assert len(phases) == 1
-        assert phases[0].status == PhaseStatus.REJECTED
+        rejected = [p for p in phases if p.status == PhaseStatus.REJECTED]
+        assert len(rejected) == 1
+        assert rejected[0].status == PhaseStatus.REJECTED
 
     def test_advance_marks_task_done(self, store, sample_plan_record):
-        """ADVANCE phase marks the task as done."""
+        """ADVANCE phase marks the task as done (after completing all prior phases)."""
         store.save_plan(sample_plan_record)
         task = TaskRecord(plan_id=sample_plan_record.id, seq=1, title="T1")
         store.save_task(task)
+
+        # Walk through all phases sequentially
+        advance(store, task.id, Phase.CHECK, {})
+        advance(store, task.id, Phase.CODE, _fdmc_evidence())
+        advance(store, task.id, Phase.TEST, {"build_verified": "ok"})
+        advance(store, task.id, Phase.GRADE, {"tests_passed": "ok"})
+        advance(store, task.id, Phase.COMMIT, {"seraph_id": "abc123"})
         advance(store, task.id, Phase.ADVANCE, {"knowledge_gate": "nothing_surprised"})
+
         retrieved = store.get_task(task.id)
         assert retrieved.status == TaskStatus.DONE
 
@@ -165,6 +178,34 @@ class TestAdvance:
         result, phase = advance(store, "nonexistent", Phase.CHECK, {})
         assert result.passed is False
         assert "not found" in result.message
+
+    def test_advance_rejects_skipped_phase(self, store, sample_plan_record):
+        """Cannot skip phases — must complete prior phase first."""
+        store.save_plan(sample_plan_record)
+        task = TaskRecord(plan_id=sample_plan_record.id, seq=1, title="T1")
+        store.save_task(task)
+
+        # Try to jump to CODE without completing CHECK
+        result, phase = advance(store, task.id, Phase.CODE, _fdmc_evidence())
+        assert result.passed is False
+        assert "CHECK not completed" in result.message
+
+        # Try to jump to ADVANCE without any prior phases
+        result, phase = advance(store, task.id, Phase.ADVANCE, {
+            "knowledge_gate": "nothing_surprised",
+        })
+        assert result.passed is False
+        assert "COMMIT not completed" in result.message
+
+    def test_advance_prefix_matching(self, store, sample_plan_record):
+        """Task IDs can be matched by prefix (min 8 chars)."""
+        store.save_plan(sample_plan_record)
+        task = TaskRecord(plan_id=sample_plan_record.id, seq=1, title="T1")
+        store.save_task(task)
+
+        prefix = task.id[:12]
+        result, phase = advance(store, prefix, Phase.CHECK, {})
+        assert result.passed is True
 
 
 class TestClosePlan:

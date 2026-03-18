@@ -171,15 +171,35 @@ def advance(
     if task is None:
         return GateResult(passed=False, message=f"Task '{task_id}' not found"), None
 
+    # Use the resolved full ID from here on (supports prefix matching)
+    full_id = task.id
+
     plan = store.get_plan(task.plan_id)
     grade_enabled = plan.grade_enabled if plan else True
 
-    # Validate the gate
+    # Enforce sequential phase ordering
+    if phase != Phase.CHECK:
+        prev_phase = _PHASE_ORDER[_PHASE_ORDER.index(phase) - 1]
+        completed_phases = store.get_phases(full_id)
+        prev_completed = any(
+            p.phase == prev_phase and p.status == PhaseStatus.COMPLETED
+            for p in completed_phases
+        )
+        if not prev_completed:
+            return GateResult(
+                passed=False,
+                message=(
+                    f"Cannot advance to {phase.value}: "
+                    f"previous phase {prev_phase.value} not completed"
+                ),
+            ), None
+
+    # Validate the gate evidence
     result = validate_evidence(phase, evidence, grade_enabled=grade_enabled)
     if not result.passed:
         # Record the rejection
         rejected = PhaseRecord(
-            task_id=task_id,
+            task_id=full_id,
             phase=phase,
             status=PhaseStatus.REJECTED,
             evidence_json=json.dumps(evidence, default=str),
@@ -189,7 +209,7 @@ def advance(
 
     # Gate passed — record completion
     completed = PhaseRecord(
-        task_id=task_id,
+        task_id=full_id,
         phase=phase,
         status=PhaseStatus.COMPLETED,
         evidence_json=json.dumps(evidence, default=str),
@@ -199,7 +219,7 @@ def advance(
 
     # If this is the ADVANCE phase, mark the task as done
     if phase == Phase.ADVANCE:
-        store.update_task_status(task_id, TaskStatus.DONE)
+        store.update_task_status(full_id, TaskStatus.DONE)
 
     return result, completed
 
