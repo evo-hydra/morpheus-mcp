@@ -46,7 +46,7 @@ class TestSchemaVersion:
         cur = store.conn.execute(
             "SELECT value FROM morpheus_meta WHERE key='schema_version'"
         )
-        assert cur.fetchone()[0] == "1"
+        assert cur.fetchone()[0] == "2"
 
     def test_idempotent_open(self, tmp_path):
         """Opening twice doesn't change schema version."""
@@ -57,7 +57,7 @@ class TestSchemaVersion:
             cur = s.conn.execute(
                 "SELECT value FROM morpheus_meta WHERE key='schema_version'"
             )
-            assert cur.fetchone()[0] == "1"
+            assert cur.fetchone()[0] == "2"
 
 
 class TestPlanCRUD:

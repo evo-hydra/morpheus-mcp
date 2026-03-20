@@ -7,10 +7,10 @@ import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
-from morpheus_mcp.models.enums import Phase, PhaseStatus, PlanStatus, TaskStatus
+from morpheus_mcp.models.enums import Phase, PhaseStatus, PlanStatus, TaskSize, TaskStatus
 from morpheus_mcp.models.plan import PhaseRecord, PlanRecord, TaskRecord
 
-SCHEMA_VERSION = "1"
+SCHEMA_VERSION = "2"
 
 _SCHEMA_SQL = """\
 CREATE TABLE IF NOT EXISTS morpheus_meta (
@@ -38,6 +38,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     do_text    TEXT NOT NULL DEFAULT '',
     done_when  TEXT NOT NULL DEFAULT '',
     status     TEXT NOT NULL DEFAULT 'pending',
+    size       TEXT NOT NULL DEFAULT 'medium',
     claimed_by TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_tasks_plan ON tasks(plan_id);
@@ -123,7 +124,10 @@ class MorpheusStore:
     def _run_migrations(self, from_version: str) -> None:
         """Run schema migrations sequentially."""
         migrations: dict[str, str] = {
-            # "1": "ALTER TABLE ...; UPDATE morpheus_meta SET value='2' WHERE key='schema_version';",
+            "1": (
+                "ALTER TABLE tasks ADD COLUMN size TEXT NOT NULL DEFAULT 'medium';"
+                " UPDATE morpheus_meta SET value='2' WHERE key='schema_version';"
+            ),
         }
         current = from_version
         while current != SCHEMA_VERSION:
@@ -214,8 +218,8 @@ class MorpheusStore:
         """Insert or replace a task record."""
         self.conn.execute(
             "INSERT OR REPLACE INTO tasks"
-            "(id, plan_id, seq, title, files_json, do_text, done_when, status, claimed_by) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "(id, plan_id, seq, title, files_json, do_text, done_when, status, size, claimed_by) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 task.id,
                 task.plan_id,
@@ -225,30 +229,33 @@ class MorpheusStore:
                 task.do_text,
                 task.done_when,
                 task.status.value,
+                task.size.value,
                 task.claimed_by,
             ),
         )
         self.conn.commit()
+
+    def _row_to_task(self, row: tuple) -> TaskRecord:  # type: ignore[type-arg]
+        """Convert a database row to a TaskRecord."""
+        return TaskRecord(
+            id=row[0],
+            plan_id=row[1],
+            seq=row[2],
+            title=row[3],
+            files_json=row[4],
+            do_text=row[5],
+            done_when=row[6],
+            status=TaskStatus(row[7]),
+            size=TaskSize(row[8]),
+            claimed_by=row[9],
+        )
 
     def get_tasks(self, plan_id: str) -> list[TaskRecord]:
         """Get all tasks for a plan, ordered by sequence."""
         cur = self.conn.execute(
             "SELECT * FROM tasks WHERE plan_id = ? ORDER BY seq", (plan_id,)
         )
-        return [
-            TaskRecord(
-                id=row[0],
-                plan_id=row[1],
-                seq=row[2],
-                title=row[3],
-                files_json=row[4],
-                do_text=row[5],
-                done_when=row[6],
-                status=TaskStatus(row[7]),
-                claimed_by=row[8],
-            )
-            for row in cur.fetchall()
-        ]
+        return [self._row_to_task(row) for row in cur.fetchall()]
 
     def get_task(self, task_id: str) -> TaskRecord | None:
         """Retrieve a single task by ID or prefix (min 8 chars)."""
@@ -262,17 +269,7 @@ class MorpheusStore:
             row = cur.fetchone()
         if row is None:
             return None
-        return TaskRecord(
-            id=row[0],
-            plan_id=row[1],
-            seq=row[2],
-            title=row[3],
-            files_json=row[4],
-            do_text=row[5],
-            done_when=row[6],
-            status=TaskStatus(row[7]),
-            claimed_by=row[8],
-        )
+        return self._row_to_task(row)
 
     def update_task_status(self, task_id: str, status: TaskStatus) -> None:
         """Update a task's status."""
@@ -291,17 +288,7 @@ class MorpheusStore:
         row = cur.fetchone()
         if row is None:
             return None
-        return TaskRecord(
-            id=row[0],
-            plan_id=row[1],
-            seq=row[2],
-            title=row[3],
-            files_json=row[4],
-            do_text=row[5],
-            done_when=row[6],
-            status=TaskStatus(row[7]),
-            claimed_by=row[8],
-        )
+        return self._row_to_task(row)
 
     # --- Phase CRUD ---
 
