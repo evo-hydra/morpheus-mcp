@@ -10,7 +10,7 @@ from pathlib import Path
 from morpheus_mcp.models.enums import Phase, PhaseStatus, PlanStatus, TaskSize, TaskStatus
 from morpheus_mcp.models.plan import PhaseRecord, PlanRecord, TaskRecord
 
-SCHEMA_VERSION = "3"
+SCHEMA_VERSION = "4"
 
 _SCHEMA_SQL = """\
 CREATE TABLE IF NOT EXISTS morpheus_meta (
@@ -54,6 +54,14 @@ CREATE TABLE IF NOT EXISTS phases (
     completed_at  TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_phases_task ON phases(task_id);
+
+CREATE TABLE IF NOT EXISTS progress_log (
+    id         TEXT PRIMARY KEY,
+    task_id    TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    message    TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_progress_task ON progress_log(task_id);
 """
 
 
@@ -132,6 +140,13 @@ class MorpheusStore:
             "2": (
                 "ALTER TABLE plans ADD COLUMN mode TEXT NOT NULL DEFAULT 'standard';"
                 " UPDATE morpheus_meta SET value='3' WHERE key='schema_version';"
+            ),
+            "3": (
+                "CREATE TABLE IF NOT EXISTS progress_log ("
+                "id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE, "
+                "message TEXT NOT NULL, created_at TEXT NOT NULL);"
+                " CREATE INDEX IF NOT EXISTS idx_progress_task ON progress_log(task_id);"
+                " UPDATE morpheus_meta SET value='4' WHERE key='schema_version';"
             ),
         }
         current = from_version
@@ -337,3 +352,29 @@ class MorpheusStore:
             (status.value, evidence_json, completed, phase_id),
         )
         self.conn.commit()
+
+    # --- Progress Log ---
+
+    def save_progress(self, task_id: str, message: str) -> str:
+        """Log a progress entry for a task. Returns the entry ID."""
+        import uuid
+
+        entry_id = uuid.uuid4().hex
+        self.conn.execute(
+            "INSERT INTO progress_log(id, task_id, message, created_at) VALUES (?, ?, ?, ?)",
+            (entry_id, task_id, message, _iso(datetime.now(timezone.utc))),
+        )
+        self.conn.commit()
+        return entry_id
+
+    def get_progress(self, task_id: str, limit: int = 5) -> list[tuple[str, str, str]]:
+        """Get recent progress entries for a task.
+
+        Returns list of (id, message, created_at) tuples.
+        """
+        cur = self.conn.execute(
+            "SELECT id, message, created_at FROM progress_log "
+            "WHERE task_id = ? ORDER BY created_at DESC LIMIT ?",
+            (task_id, limit),
+        )
+        return [(row[0], row[1], row[2]) for row in cur.fetchall()]

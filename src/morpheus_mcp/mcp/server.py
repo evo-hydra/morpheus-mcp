@@ -160,6 +160,29 @@ def create_server(config=None):
             return f"Error: {exc}"
 
     @mcp.tool()
+    def morpheus_progress(task_id: str, message: str) -> str:
+        """Log progress for a task without advancing phases.
+
+        Purely observational — records a timestamped message for the task.
+        Visible in morpheus_status output for the active task.
+
+        Args:
+            task_id: The task ID to log progress for
+            message: Progress message to record
+        """
+        from morpheus_mcp.core.store import MorpheusStore
+
+        try:
+            with MorpheusStore(_config.db_path) as store:
+                task = store.get_task(task_id)
+                if task is None:
+                    return f"Error: Task '{task_id}' not found"
+                entry_id = store.save_progress(task.id, message)
+                return f"Progress logged: `{entry_id[:12]}` — {message}"
+        except (sqlite3.Error, OSError) as exc:
+            return f"Error: {exc}"
+
+    @mcp.tool()
     def morpheus_close(plan_id: str) -> str:
         """Mark a plan as completed and return final summary.
 
