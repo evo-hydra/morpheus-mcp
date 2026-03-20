@@ -37,6 +37,14 @@ def integration_plan(tmp_path):
     return f
 
 
+def _code_ev(sibling: str = "merovingian/src/config.py") -> dict:
+    return {"sibling_read": sibling}
+
+
+def _grade_ev(tests: str = "12 passed", fdmc: str = "Consistent — matched") -> dict:
+    return {"tests_passed": tests, "fdmc_review": fdmc}
+
+
 def test_full_lifecycle(tmp_path, integration_plan):
     """Simulate a complete Morpheus lifecycle through all phases."""
     config = MorpheusConfig.load(tmp_path / "data")
@@ -62,19 +70,8 @@ def test_full_lifecycle(tmp_path, integration_plan):
         result, phase = advance(store, task1.id, Phase.CHECK, {})
         assert result.passed is True
 
-        # Phase: CODE (requires FDMC with sibling_read)
-        fdmc = {
-            "fdmc_preflight": json.dumps({
-                "consistent": {
-                    "sibling_read": "merovingian/src/merovingian/config.py",
-                    "note": "matched frozen dataclass pattern",
-                },
-                "future_proof": "no caller assumptions",
-                "dynamic": "all values configurable",
-                "modular": "single responsibility",
-            })
-        }
-        result, phase = advance(store, task1.id, Phase.CODE, fdmc)
+        # Phase: CODE (requires sibling_read)
+        result, phase = advance(store, task1.id, Phase.CODE, _code_ev())
         assert result.passed is True
 
         # Phase: TEST (requires build_verified)
@@ -83,10 +80,8 @@ def test_full_lifecycle(tmp_path, integration_plan):
         )
         assert result.passed is True
 
-        # Phase: GRADE (requires tests_passed)
-        result, phase = advance(
-            store, task1.id, Phase.GRADE, {"tests_passed": "12 tests passed in 0.3s"}
-        )
+        # Phase: GRADE (requires tests_passed + fdmc_review)
+        result, phase = advance(store, task1.id, Phase.GRADE, _grade_ev())
         assert result.passed is True
 
         # Phase: COMMIT (requires seraph_id)
@@ -113,9 +108,9 @@ def test_full_lifecycle(tmp_path, integration_plan):
 
         # Quick advance through task 2
         advance(store, task2.id, Phase.CHECK, {})
-        advance(store, task2.id, Phase.CODE, fdmc)
+        advance(store, task2.id, Phase.CODE, _code_ev())
         advance(store, task2.id, Phase.TEST, {"build_verified": "ok"})
-        advance(store, task2.id, Phase.GRADE, {"tests_passed": "ok"})
+        advance(store, task2.id, Phase.GRADE, _grade_ev())
         advance(store, task2.id, Phase.COMMIT, {"seraph_id": "def789"})
         advance(store, task2.id, Phase.ADVANCE, {"knowledge_gate": "nothing_surprised"})
 
@@ -147,21 +142,13 @@ def test_gate_rejection_and_retry(tmp_path, integration_plan):
         # Advance CHECK
         advance(store, task.id, Phase.CHECK, {})
 
-        # Try CODE without FDMC — should be rejected
+        # Try CODE without sibling_read — should be rejected
         result, phase = advance(store, task.id, Phase.CODE, {})
         assert result.passed is False
-        assert "fdmc_preflight" in result.message
+        assert "sibling_read" in result.message
 
         # Retry with proper evidence — should pass
-        fdmc = {
-            "fdmc_preflight": json.dumps({
-                "consistent": {"sibling_read": "some/file.py"},
-                "future_proof": "ok",
-                "dynamic": "ok",
-                "modular": "ok",
-            })
-        }
-        result, phase = advance(store, task.id, Phase.CODE, fdmc)
+        result, phase = advance(store, task.id, Phase.CODE, _code_ev())
         assert result.passed is True
 
         # Verify rejection was recorded
@@ -191,14 +178,9 @@ def test_grade_disabled_plan(tmp_path):
         task = store.get_next_pending_task(plan.id)
 
         advance(store, task.id, Phase.CHECK, {})
-        advance(store, task.id, Phase.CODE, {
-            "fdmc_preflight": json.dumps({
-                "consistent": {"sibling_read": "x.py"},
-                "future_proof": "ok", "dynamic": "ok", "modular": "ok",
-            })
-        })
+        advance(store, task.id, Phase.CODE, _code_ev())
         advance(store, task.id, Phase.TEST, {"build_verified": "ok"})
-        advance(store, task.id, Phase.GRADE, {"tests_passed": "ok"})
+        advance(store, task.id, Phase.GRADE, _grade_ev("ok", "Consistent — ok"))
 
         # COMMIT without seraph_id — should pass because grade=false
         result, _ = advance(store, task.id, Phase.COMMIT, {})

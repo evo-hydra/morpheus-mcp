@@ -17,16 +17,14 @@ from morpheus_mcp.models.enums import Phase, PhaseStatus, PlanStatus, TaskSize, 
 from morpheus_mcp.models.plan import PlanRecord, TaskRecord
 
 
-def _fdmc_evidence(sibling: str = "sibling.py") -> dict:
-    """Build valid FDMC preflight evidence."""
-    return {
-        "fdmc_preflight": json.dumps({
-            "consistent": {"sibling_read": sibling, "note": "matched"},
-            "future_proof": "no assumptions",
-            "dynamic": "configurable",
-            "modular": "single responsibility",
-        })
-    }
+def _code_evidence(sibling: str = "sibling.py") -> dict:
+    """Build valid CODE phase evidence (sibling_read)."""
+    return {"sibling_read": sibling}
+
+
+def _grade_evidence(tests: str = "12 passed", fdmc: str = "Consistent — matched pattern") -> dict:
+    """Build valid GRADE phase evidence."""
+    return {"tests_passed": tests, "fdmc_review": fdmc}
 
 
 class TestValidateEvidence:
@@ -39,32 +37,28 @@ class TestValidateEvidence:
         """CODE rejects empty evidence."""
         r = validate_evidence(Phase.CODE, {})
         assert r.passed is False
-        assert "fdmc_preflight" in r.message
+        assert "sibling_read" in r.message
 
-    def test_code_reject_missing_lenses(self):
-        """CODE rejects FDMC with missing lenses."""
-        r = validate_evidence(Phase.CODE, {
-            "fdmc_preflight": json.dumps({"consistent": {"sibling_read": "x"}})
-        })
+    def test_code_reject_empty_sibling(self):
+        """CODE rejects empty sibling_read string."""
+        r = validate_evidence(Phase.CODE, {"sibling_read": ""})
         assert r.passed is False
-        assert "missing lenses" in r.message
 
-    def test_code_reject_no_sibling_read(self):
-        """CODE rejects consistent lens without sibling_read."""
+    def test_code_accept_valid(self):
+        """CODE accepts valid sibling_read evidence."""
+        r = validate_evidence(Phase.CODE, _code_evidence())
+        assert r.passed is True
+
+    def test_code_backward_compat_fdmc_preflight(self):
+        """CODE accepts old fdmc_preflight format by extracting sibling_read."""
         r = validate_evidence(Phase.CODE, {
             "fdmc_preflight": json.dumps({
-                "consistent": {"note": "looked good"},
+                "consistent": {"sibling_read": "sibling.py"},
                 "future_proof": "ok",
                 "dynamic": "ok",
                 "modular": "ok",
             })
         })
-        assert r.passed is False
-        assert "sibling_read" in r.message
-
-    def test_code_accept_valid(self):
-        """CODE accepts valid FDMC evidence."""
-        r = validate_evidence(Phase.CODE, _fdmc_evidence())
         assert r.passed is True
 
     def test_test_reject_empty(self):
@@ -84,9 +78,15 @@ class TestValidateEvidence:
         assert r.passed is False
 
     def test_grade_accept(self):
-        """GRADE accepts with tests_passed."""
-        r = validate_evidence(Phase.GRADE, {"tests_passed": "12 passed"})
+        """GRADE accepts with tests_passed and fdmc_review."""
+        r = validate_evidence(Phase.GRADE, _grade_evidence())
         assert r.passed is True
+
+    def test_grade_reject_missing_fdmc_review(self):
+        """GRADE rejects without fdmc_review."""
+        r = validate_evidence(Phase.GRADE, {"tests_passed": "12 passed"})
+        assert r.passed is False
+        assert "fdmc_review" in r.message
 
     def test_commit_reject_no_seraph(self):
         """COMMIT rejects without seraph_id when grade enabled."""
@@ -143,10 +143,10 @@ class TestSizeAwareGates:
         assert r.passed is False
 
     def test_medium_unchanged(self):
-        """MEDIUM tasks behave identically to default (CODE requires fdmc)."""
+        """MEDIUM tasks behave identically to default (CODE requires sibling_read)."""
         r = validate_evidence(Phase.CODE, {}, task_size=TaskSize.MEDIUM)
         assert r.passed is False
-        assert "fdmc_preflight" in r.message
+        assert "sibling_read" in r.message
 
     def test_large_requires_seraph_even_grade_disabled(self):
         """LARGE tasks require seraph_id even when grade is disabled."""
@@ -293,9 +293,9 @@ class TestAdvance:
 
         # Walk through all phases sequentially
         advance(store, task.id, Phase.CHECK, {})
-        advance(store, task.id, Phase.CODE, _fdmc_evidence())
+        advance(store, task.id, Phase.CODE, _code_evidence())
         advance(store, task.id, Phase.TEST, {"build_verified": "ok"})
-        advance(store, task.id, Phase.GRADE, {"tests_passed": "ok"})
+        advance(store, task.id, Phase.GRADE, _grade_evidence())
         advance(store, task.id, Phase.COMMIT, {"seraph_id": "abc123"})
         advance(store, task.id, Phase.ADVANCE, {"knowledge_gate": "nothing_surprised"})
 
@@ -315,7 +315,7 @@ class TestAdvance:
         store.save_task(task)
 
         # Try to jump to CODE without completing CHECK
-        result, phase = advance(store, task.id, Phase.CODE, _fdmc_evidence())
+        result, phase = advance(store, task.id, Phase.CODE, _code_evidence())
         assert result.passed is False
         assert "CHECK not completed" in result.message
 

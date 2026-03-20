@@ -16,16 +16,14 @@ from morpheus_mcp.models.plan import PhaseRecord, PlanRecord, TaskRecord
 GATES: dict[Phase, dict[str, str]] = {
     Phase.CHECK: {},
     Phase.CODE: {
-        "fdmc_preflight": (
-            "Dict with keys: consistent (must include sibling_read), "
-            "future_proof, dynamic, modular"
-        ),
+        "sibling_read": "Path to sibling file read, or 'N/A' for greenfield",
     },
     Phase.TEST: {
         "build_verified": "Build command output or confirmation",
     },
     Phase.GRADE: {
         "tests_passed": "Test output summary or skip reason",
+        "fdmc_review": "FDMC lens one-liner: what you checked or fixed post-code",
     },
     Phase.COMMIT: {
         "seraph_id": "Seraph assessment ID (or 'grade_disabled' if plan has grade=false)",
@@ -74,16 +72,40 @@ def validate_evidence(
     if not required:
         return GateResult(passed=True, message="No gate for this phase")
 
+    # Backward compat: if old fdmc_preflight is provided, extract sibling_read
+    if phase == Phase.CODE and "fdmc_preflight" in evidence and "sibling_read" not in evidence:
+        fdmc = evidence["fdmc_preflight"]
+        if isinstance(fdmc, str):
+            try:
+                fdmc = json.loads(fdmc)
+            except (json.JSONDecodeError, TypeError):
+                fdmc = {}
+        if isinstance(fdmc, dict):
+            consistent = fdmc.get("consistent", {})
+            if isinstance(consistent, str):
+                try:
+                    consistent = json.loads(consistent)
+                except (json.JSONDecodeError, TypeError):
+                    consistent = {}
+            if isinstance(consistent, dict) and "sibling_read" in consistent:
+                evidence = {**evidence, "sibling_read": consistent["sibling_read"]}
+
     missing: list[str] = []
     for key, description in required.items():
-        # SMALL tasks: skip fdmc_preflight, seraph_id, and knowledge_gate
+        # SMALL tasks: skip sibling_read, fdmc_review, seraph_id, knowledge_gate
         if task_size == TaskSize.SMALL:
-            if phase == Phase.CODE and key == "fdmc_preflight":
+            if phase == Phase.CODE and key == "sibling_read":
+                continue
+            if phase == Phase.GRADE and key == "fdmc_review":
                 continue
             if phase == Phase.COMMIT and key == "seraph_id":
                 continue
             if phase == Phase.ADVANCE and key == "knowledge_gate":
                 continue
+
+        # Greenfield mode: sibling_read not required
+        if phase == Phase.CODE and key == "sibling_read" and plan_mode == "greenfield":
+            continue
 
         # MEDIUM tasks: COMMIT gate — seraph_id not required if grade disabled
         if phase == Phase.COMMIT and key == "seraph_id" and not grade_enabled:
@@ -100,46 +122,6 @@ def validate_evidence(
             passed=False,
             message=f"Gate '{phase.value}' requires:\n  - {missing_str}",
         )
-
-    # Validate FDMC preflight structure (CODE gate) — skipped for SMALL tasks
-    if phase == Phase.CODE and "fdmc_preflight" in evidence:
-        fdmc = evidence["fdmc_preflight"]
-        if isinstance(fdmc, str):
-            try:
-                fdmc = json.loads(fdmc)
-            except (json.JSONDecodeError, TypeError):
-                return GateResult(
-                    passed=False,
-                    message="Gate 'CODE': fdmc_preflight must be a JSON dict",
-                )
-
-        if isinstance(fdmc, dict):
-            required_lenses = {"consistent", "future_proof", "dynamic", "modular"}
-            present = set(fdmc.keys())
-            lens_missing = required_lenses - present
-            if lens_missing:
-                return GateResult(
-                    passed=False,
-                    message=f"Gate 'CODE': fdmc_preflight missing lenses: {lens_missing}",
-                )
-
-            # Consistent lens must include sibling_read (unless greenfield mode)
-            if plan_mode != "greenfield":
-                consistent = fdmc.get("consistent", {})
-                if isinstance(consistent, str):
-                    try:
-                        consistent = json.loads(consistent)
-                    except (json.JSONDecodeError, TypeError):
-                        consistent = {"note": consistent}
-
-                if isinstance(consistent, dict) and "sibling_read" not in consistent:
-                    return GateResult(
-                        passed=False,
-                        message=(
-                            "Gate 'CODE': fdmc_preflight.consistent must include "
-                            "'sibling_read' (the file path you read)"
-                        ),
-                    )
 
     return GateResult(passed=True, message="Gate passed")
 
