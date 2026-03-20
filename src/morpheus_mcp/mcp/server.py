@@ -123,6 +123,43 @@ def create_server(config=None):
             return f"Error: {exc}"
 
     @mcp.tool()
+    def morpheus_advance_batch(advances: str) -> str:
+        """Advance multiple tasks through phase gates in a single call.
+
+        Processes each advance sequentially. Stops at the first failure.
+        Accepts a JSON array of objects with keys: task_id, phase, evidence.
+
+        Args:
+            advances: JSON array of {task_id, phase, evidence} objects
+        """
+        from morpheus_mcp.core.engine import advance_batch
+        from morpheus_mcp.core.store import MorpheusStore
+
+        try:
+            items = json.loads(advances) if isinstance(advances, str) else advances
+        except json.JSONDecodeError as exc:
+            return f"Error: Invalid JSON: {exc}"
+
+        if not isinstance(items, list) or not items:
+            return "Error: advances must be a non-empty JSON array"
+
+        try:
+            with MorpheusStore(_config.db_path) as store:
+                batch = advance_batch(store, items)
+
+                lines = []
+                for task_id, phase, result in batch.results:
+                    status = "PASSED" if result.passed else "REJECTED"
+                    lines.append(f"- `{task_id[:12]}` {phase}: **{status}**")
+                    if not result.passed:
+                        lines.append(f"  {result.message}")
+
+                header = f"## Batch Advance: {len(batch.results)} processed"
+                return f"{header}\n\n" + "\n".join(lines)
+        except (sqlite3.Error, OSError) as exc:
+            return f"Error: {exc}"
+
+    @mcp.tool()
     def morpheus_close(plan_id: str) -> str:
         """Mark a plan as completed and return final summary.
 

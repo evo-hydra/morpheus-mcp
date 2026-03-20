@@ -244,6 +244,50 @@ def advance(
     return result, completed
 
 
+@dataclass(frozen=True, slots=True)
+class BatchResult:
+    """Result of a batch advance operation."""
+
+    results: list[tuple[str, str, GateResult]]  # (task_id, phase, result)
+
+
+def advance_batch(
+    store: MorpheusStore,
+    advances: list[dict],
+) -> BatchResult:
+    """Process multiple phase advances atomically.
+
+    If any advance fails, all preceding advances in this batch are still
+    committed (no rollback) but the batch stops at the first failure.
+
+    Args:
+        store: Open store instance.
+        advances: List of dicts with keys: task_id, phase, evidence.
+
+    Returns:
+        BatchResult with per-advance results.
+    """
+    results: list[tuple[str, str, GateResult]] = []
+    for item in advances:
+        task_id = item.get("task_id", "")
+        phase_str = item.get("phase", "")
+        evidence = item.get("evidence", {})
+
+        try:
+            phase = Phase(phase_str.upper())
+        except ValueError:
+            gate = GateResult(passed=False, message=f"Invalid phase '{phase_str}'")
+            results.append((task_id, phase_str, gate))
+            break
+
+        result, _ = advance(store, task_id, phase, evidence)
+        results.append((task_id, phase.value, result))
+        if not result.passed:
+            break
+
+    return BatchResult(results=results)
+
+
 def close_plan(store: MorpheusStore, plan_id: str) -> PlanRecord | None:
     """Mark a plan as completed.
 
