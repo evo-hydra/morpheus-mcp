@@ -226,3 +226,50 @@ class TestPhaseCRUD:
         phases = store.get_phases(task.id)
         assert phases[0].status == PhaseStatus.COMPLETED
         assert phases[0].completed_at is not None
+
+
+class TestProgressLog:
+    def test_save_and_get(self, store, sample_plan_record):
+        """Save and retrieve progress entries."""
+        store.save_plan(sample_plan_record)
+        task = TaskRecord(plan_id=sample_plan_record.id, seq=1, title="T1")
+        store.save_task(task)
+
+        entry_id = store.save_progress(task.id, "reading sibling file")
+        assert len(entry_id) == 32  # UUID hex
+
+        entries = store.get_progress(task.id)
+        assert len(entries) == 1
+        assert entries[0][1] == "reading sibling file"
+
+    def test_get_with_limit(self, store, sample_plan_record):
+        """Progress entries respect limit parameter."""
+        store.save_plan(sample_plan_record)
+        task = TaskRecord(plan_id=sample_plan_record.id, seq=1, title="T1")
+        store.save_task(task)
+
+        for i in range(10):
+            store.save_progress(task.id, f"step {i}")
+
+        entries = store.get_progress(task.id, limit=3)
+        assert len(entries) == 3
+
+    def test_empty_progress(self, store, sample_plan_record):
+        """No progress entries returns empty list."""
+        store.save_plan(sample_plan_record)
+        task = TaskRecord(plan_id=sample_plan_record.id, seq=1, title="T1")
+        store.save_task(task)
+
+        entries = store.get_progress(task.id)
+        assert entries == []
+
+    def test_cascade_delete(self, store, sample_plan_record):
+        """Deleting a plan cascades to progress entries."""
+        store.save_plan(sample_plan_record)
+        task = TaskRecord(plan_id=sample_plan_record.id, seq=1, title="T1")
+        store.save_task(task)
+        store.save_progress(task.id, "test progress")
+
+        store.conn.execute("DELETE FROM plans WHERE id = ?", (sample_plan_record.id,))
+        store.conn.commit()
+        assert store.get_progress(task.id) == []
