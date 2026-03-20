@@ -54,6 +54,7 @@ def validate_evidence(
     evidence: dict,
     grade_enabled: bool = True,
     task_size: TaskSize = TaskSize.MEDIUM,
+    plan_mode: str = "standard",
 ) -> GateResult:
     """Validate that evidence satisfies the gate requirements for a phase.
 
@@ -62,6 +63,7 @@ def validate_evidence(
         evidence: Dict of evidence key-value pairs.
         grade_enabled: Whether the plan has grading enabled.
         task_size: Task size tier — affects gate strictness.
+        plan_mode: Plan mode — 'greenfield' relaxes sibling_read.
 
     Returns:
         GateResult with passed=True if gate is satisfied, or
@@ -120,22 +122,23 @@ def validate_evidence(
                     message=f"Gate 'CODE': fdmc_preflight missing lenses: {lens_missing}",
                 )
 
-            # Consistent lens must include sibling_read
-            consistent = fdmc.get("consistent", {})
-            if isinstance(consistent, str):
-                try:
-                    consistent = json.loads(consistent)
-                except (json.JSONDecodeError, TypeError):
-                    consistent = {"note": consistent}
+            # Consistent lens must include sibling_read (unless greenfield mode)
+            if plan_mode != "greenfield":
+                consistent = fdmc.get("consistent", {})
+                if isinstance(consistent, str):
+                    try:
+                        consistent = json.loads(consistent)
+                    except (json.JSONDecodeError, TypeError):
+                        consistent = {"note": consistent}
 
-            if isinstance(consistent, dict) and "sibling_read" not in consistent:
-                return GateResult(
-                    passed=False,
-                    message=(
-                        "Gate 'CODE': fdmc_preflight.consistent must include "
-                        "'sibling_read' (the file path you read)"
-                    ),
-                )
+                if isinstance(consistent, dict) and "sibling_read" not in consistent:
+                    return GateResult(
+                        passed=False,
+                        message=(
+                            "Gate 'CODE': fdmc_preflight.consistent must include "
+                            "'sibling_read' (the file path you read)"
+                        ),
+                    )
 
     return GateResult(passed=True, message="Gate passed")
 
@@ -208,8 +211,10 @@ def advance(
             ), None
 
     # Validate the gate evidence
+    plan_mode = plan.mode if plan else "standard"
     result = validate_evidence(
         phase, evidence, grade_enabled=grade_enabled, task_size=task.size,
+        plan_mode=plan_mode,
     )
     if not result.passed:
         # Record the rejection

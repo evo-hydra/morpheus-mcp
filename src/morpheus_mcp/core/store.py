@@ -10,7 +10,7 @@ from pathlib import Path
 from morpheus_mcp.models.enums import Phase, PhaseStatus, PlanStatus, TaskSize, TaskStatus
 from morpheus_mcp.models.plan import PhaseRecord, PlanRecord, TaskRecord
 
-SCHEMA_VERSION = "2"
+SCHEMA_VERSION = "3"
 
 _SCHEMA_SQL = """\
 CREATE TABLE IF NOT EXISTS morpheus_meta (
@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS plans (
     project       TEXT NOT NULL DEFAULT '',
     test_command  TEXT NOT NULL DEFAULT '',
     grade_enabled INTEGER NOT NULL DEFAULT 1,
+    mode          TEXT NOT NULL DEFAULT 'standard',
     status        TEXT NOT NULL DEFAULT 'pending',
     created_at    TEXT NOT NULL,
     closed_at     TEXT
@@ -128,6 +129,10 @@ class MorpheusStore:
                 "ALTER TABLE tasks ADD COLUMN size TEXT NOT NULL DEFAULT 'medium';"
                 " UPDATE morpheus_meta SET value='2' WHERE key='schema_version';"
             ),
+            "2": (
+                "ALTER TABLE plans ADD COLUMN mode TEXT NOT NULL DEFAULT 'standard';"
+                " UPDATE morpheus_meta SET value='3' WHERE key='schema_version';"
+            ),
         }
         current = from_version
         while current != SCHEMA_VERSION:
@@ -146,18 +151,33 @@ class MorpheusStore:
 
     # --- Plan CRUD ---
 
+    def _row_to_plan(self, row: tuple) -> PlanRecord:  # type: ignore[type-arg]
+        """Convert a database row to a PlanRecord."""
+        return PlanRecord(
+            id=row[0],
+            name=row[1],
+            project=row[2],
+            test_command=row[3],
+            grade_enabled=bool(row[4]),
+            mode=row[5],
+            status=PlanStatus(row[6]),
+            created_at=_parse_iso(row[7]),
+            closed_at=_parse_iso(row[8]) if row[8] else None,
+        )
+
     def save_plan(self, plan: PlanRecord) -> None:
         """Insert or replace a plan record."""
         self.conn.execute(
             "INSERT OR REPLACE INTO plans"
-            "(id, name, project, test_command, grade_enabled, status, created_at, closed_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "(id, name, project, test_command, grade_enabled, mode, status, created_at, closed_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 plan.id,
                 plan.name,
                 plan.project,
                 plan.test_command,
                 1 if plan.grade_enabled else 0,
+                plan.mode,
                 plan.status.value,
                 _iso(plan.created_at),
                 _iso(plan.closed_at) if plan.closed_at else None,
@@ -171,16 +191,7 @@ class MorpheusStore:
         row = cur.fetchone()
         if row is None:
             return None
-        return PlanRecord(
-            id=row[0],
-            name=row[1],
-            project=row[2],
-            test_command=row[3],
-            grade_enabled=bool(row[4]),
-            status=PlanStatus(row[5]),
-            created_at=_parse_iso(row[6]),
-            closed_at=_parse_iso(row[7]) if row[7] else None,
-        )
+        return self._row_to_plan(row)
 
     def update_plan_status(self, plan_id: str, status: PlanStatus) -> None:
         """Update a plan's status."""
@@ -198,19 +209,7 @@ class MorpheusStore:
     def list_plans(self) -> list[PlanRecord]:
         """List all plans ordered by creation time."""
         cur = self.conn.execute("SELECT * FROM plans ORDER BY created_at DESC")
-        return [
-            PlanRecord(
-                id=row[0],
-                name=row[1],
-                project=row[2],
-                test_command=row[3],
-                grade_enabled=bool(row[4]),
-                status=PlanStatus(row[5]),
-                created_at=_parse_iso(row[6]),
-                closed_at=_parse_iso(row[7]) if row[7] else None,
-            )
-            for row in cur.fetchall()
-        ]
+        return [self._row_to_plan(row) for row in cur.fetchall()]
 
     # --- Task CRUD ---
 
