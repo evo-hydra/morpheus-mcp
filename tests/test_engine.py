@@ -337,6 +337,35 @@ class TestAdvance:
         assert result.passed is True
 
 
+class TestSimplifiedKnowledgeGate:
+    """Tests for boolean-style knowledge_gate in ADVANCE phase."""
+
+    def test_accept_true_string(self):
+        """ADVANCE accepts 'true' as knowledge_gate."""
+        r = validate_evidence(Phase.ADVANCE, {"knowledge_gate": "true"})
+        assert r.passed is True
+
+    def test_accept_false_string(self):
+        """ADVANCE accepts 'false' as knowledge_gate (conscious fast-pass)."""
+        r = validate_evidence(Phase.ADVANCE, {"knowledge_gate": "false"})
+        assert r.passed is True
+
+    def test_accept_sentinel_id(self):
+        """ADVANCE still accepts sentinel solution IDs."""
+        r = validate_evidence(Phase.ADVANCE, {"knowledge_gate": "sol_abc123"})
+        assert r.passed is True
+
+    def test_reject_empty(self):
+        """ADVANCE rejects empty knowledge_gate."""
+        r = validate_evidence(Phase.ADVANCE, {"knowledge_gate": ""})
+        assert r.passed is False
+
+    def test_small_task_skips(self):
+        """SMALL tasks skip knowledge_gate entirely."""
+        r = validate_evidence(Phase.ADVANCE, {}, task_size=TaskSize.SMALL)
+        assert r.passed is True
+
+
 class TestBatchAdvance:
     """Tests for advance_batch."""
 

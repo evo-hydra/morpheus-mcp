@@ -32,7 +32,8 @@ GATES: dict[Phase, dict[str, str]] = {
     },
     Phase.ADVANCE: {
         "knowledge_gate": (
-            "sentinel_solution_id, sentinel_verify_id, or 'nothing_surprised'"
+            "sentinel_solution_id, sentinel_verify_id, 'nothing_surprised', "
+            "or 'true'/'false' (boolean-style fast-pass)"
         ),
     },
 }
