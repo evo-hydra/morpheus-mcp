@@ -35,6 +35,7 @@ class PlanRecord:
     project: str = ""
     test_command: str = ""
     grade_enabled: bool = True
+    mode: str = "standard"
     status: PlanStatus = PlanStatus.PENDING
     created_at: datetime = field(default_factory=_now)
     closed_at: datetime | None = None

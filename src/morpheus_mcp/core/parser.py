@@ -83,11 +83,15 @@ def parse_plan_file(path: str | Path) -> tuple[PlanRecord, list[TaskRecord]]:
     grade_raw = fm.get("grade", "true").lower()
     grade_enabled = grade_raw not in ("false", "no", "0")
 
+    mode_raw = fm.get("mode", "standard").strip().lower()
+    mode = mode_raw if mode_raw in ("standard", "greenfield") else "standard"
+
     plan = PlanRecord(
         name=fm.get("name", path.stem),
         project=fm.get("project", ""),
         test_command=fm.get("test_command", ""),
         grade_enabled=grade_enabled,
+        mode=mode,
         status=PlanStatus.PENDING,
     )
 
