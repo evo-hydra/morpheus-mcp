@@ -70,6 +70,21 @@ test_command: "echo ok"
 - **size**: huge
 """
 
+SAMPLE_GREENFIELD_PLAN_MD = """\
+---
+name: Greenfield Plan
+project: /tmp/greenfield
+test_command: "echo ok"
+mode: greenfield
+---
+
+## 1. Bootstrap project
+- **files**: src/main.py
+- **do**: Create entry point
+- **done-when**: Main runs
+- **status**: pending
+"""
+
 SAMPLE_PLAN_NO_GRADE_MD = """\
 ---
 name: Config Plan
@@ -107,6 +122,14 @@ def sample_plan_no_grade_file(tmp_path):
     """Write sample plan with grade=false to a temp file."""
     plan_file = tmp_path / "no-grade-plan.md"
     plan_file.write_text(SAMPLE_PLAN_NO_GRADE_MD)
+    return plan_file
+
+
+@pytest.fixture
+def sample_greenfield_plan_file(tmp_path):
+    """Write sample greenfield plan to a temp file."""
+    plan_file = tmp_path / "greenfield-plan.md"
+    plan_file.write_text(SAMPLE_GREENFIELD_PLAN_MD)
     return plan_file
 
 

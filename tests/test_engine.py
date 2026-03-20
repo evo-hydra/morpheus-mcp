@@ -184,6 +184,63 @@ class TestSizeAwareGates:
         assert retrieved.status == TaskStatus.DONE
 
 
+class TestGreenfieldMode:
+    """Tests for greenfield plan mode relaxations."""
+
+    def test_greenfield_skips_sibling_read(self):
+        """Greenfield mode skips sibling_read in CODE FDMC check."""
+        evidence = {
+            "fdmc_preflight": json.dumps({
+                "consistent": {"note": "greenfield, no siblings"},
+                "future_proof": "ok",
+                "dynamic": "ok",
+                "modular": "ok",
+            })
+        }
+        r = validate_evidence(Phase.CODE, evidence, plan_mode="greenfield")
+        assert r.passed is True
+
+    def test_standard_still_requires_sibling_read(self):
+        """Standard mode still requires sibling_read."""
+        evidence = {
+            "fdmc_preflight": json.dumps({
+                "consistent": {"note": "looked good"},
+                "future_proof": "ok",
+                "dynamic": "ok",
+                "modular": "ok",
+            })
+        }
+        r = validate_evidence(Phase.CODE, evidence, plan_mode="standard")
+        assert r.passed is False
+        assert "sibling_read" in r.message
+
+    def test_greenfield_small_combo(self):
+        """Greenfield + SMALL is the most relaxed path."""
+        # CODE: no fdmc needed (small), no sibling_read needed (greenfield)
+        r = validate_evidence(Phase.CODE, {}, task_size=TaskSize.SMALL, plan_mode="greenfield")
+        assert r.passed is True
+
+    def test_greenfield_full_lifecycle(self, store):
+        """Greenfield plan completes full lifecycle without sibling_read."""
+        plan = PlanRecord(name="GF", project="/tmp", mode="greenfield")
+        store.save_plan(plan)
+        task = TaskRecord(plan_id=plan.id, seq=1, title="T1")
+        store.save_task(task)
+        store.update_plan_status(plan.id, PlanStatus.ACTIVE)
+
+        evidence_code = {
+            "fdmc_preflight": json.dumps({
+                "consistent": {"note": "greenfield"},
+                "future_proof": "ok",
+                "dynamic": "ok",
+                "modular": "ok",
+            })
+        }
+        advance(store, task.id, Phase.CHECK, {})
+        result, _ = advance(store, task.id, Phase.CODE, evidence_code)
+        assert result.passed is True
+
+
 class TestInitPlan:
     def test_init_saves_and_activates(self, store):
         """init_plan saves plan and tasks, sets status to active."""

@@ -90,6 +90,20 @@ class TestPlanCRUD:
         retrieved = store.get_plan(plan.id)
         assert retrieved.closed_at is not None
 
+    def test_mode_roundtrip(self, store):
+        """Plan mode field roundtrips through store."""
+        plan = PlanRecord(name="GF", project="/tmp", mode="greenfield")
+        store.save_plan(plan)
+        retrieved = store.get_plan(plan.id)
+        assert retrieved.mode == "greenfield"
+
+    def test_mode_defaults_to_standard(self, store):
+        """Plans without explicit mode default to standard."""
+        plan = PlanRecord(name="Default", project="/tmp")
+        store.save_plan(plan)
+        retrieved = store.get_plan(plan.id)
+        assert retrieved.mode == "standard"
+
     def test_list_plans(self, store):
         """List all plans."""
         store.save_plan(PlanRecord(name="A", project="/a"))

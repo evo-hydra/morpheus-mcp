@@ -77,6 +77,23 @@ class TestParsePlanFile:
         assert tasks[2].size == TaskSize.LARGE
         assert tasks[3].size == TaskSize.MEDIUM  # invalid falls back to medium
 
+    def test_greenfield_mode_parsing(self, sample_greenfield_plan_file):
+        """Plans with mode: greenfield parse correctly."""
+        plan, _ = parse_plan_file(sample_greenfield_plan_file)
+        assert plan.mode == "greenfield"
+
+    def test_mode_defaults_to_standard(self, sample_plan_file):
+        """Plans without mode field default to standard."""
+        plan, _ = parse_plan_file(sample_plan_file)
+        assert plan.mode == "standard"
+
+    def test_invalid_mode_defaults_to_standard(self, tmp_path):
+        """Invalid mode values fall back to standard."""
+        f = tmp_path / "bad-mode.md"
+        f.write_text("---\nname: Bad Mode\nmode: chaos\n---\n\n## 1. Task\n- **files**: x.py\n- **do**: x\n- **done-when**: y\n- **status**: pending\n")
+        plan, _ = parse_plan_file(f)
+        assert plan.mode == "standard"
+
     def test_task_size_default(self, sample_plan_file):
         """Tasks without size field default to MEDIUM."""
         _, tasks = parse_plan_file(sample_plan_file)
