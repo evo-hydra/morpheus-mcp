@@ -5,6 +5,7 @@ from morpheus_mcp.models.enums import (
     Phase,
     PhaseStatus,
     PlanStatus,
+    TaskSize,
     TaskStatus,
 )
 from morpheus_mcp.models.plan import (
@@ -23,5 +24,6 @@ __all__ = [
     "PlanRecord",
     "PlanStatus",
     "TaskRecord",
+    "TaskSize",
     "TaskStatus",
 ]

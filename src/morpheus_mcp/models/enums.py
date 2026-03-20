@@ -43,6 +43,14 @@ class PhaseStatus(str, Enum):
     REJECTED = "rejected"
 
 
+class TaskSize(str, Enum):
+    """Size tier for a task — controls gate strictness."""
+
+    SMALL = "small"
+    MEDIUM = "medium"
+    LARGE = "large"
+
+
 class FeedbackOutcome(str, Enum):
     """Outcome of user feedback."""
 

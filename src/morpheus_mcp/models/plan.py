@@ -11,6 +11,7 @@ from morpheus_mcp.models.enums import (
     Phase,
     PhaseStatus,
     PlanStatus,
+    TaskSize,
     TaskStatus,
 )
 
@@ -51,6 +52,7 @@ class TaskRecord:
     do_text: str = ""
     done_when: str = ""
     status: TaskStatus = TaskStatus.PENDING
+    size: TaskSize = TaskSize.MEDIUM
     claimed_by: str | None = None
 
 
