@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from morpheus_mcp.models.enums import Phase, TaskStatus
+from morpheus_mcp.models.enums import Phase, TaskSize, TaskStatus
 from morpheus_mcp.models.plan import PhaseRecord, PlanRecord, TaskRecord
 
 
@@ -23,8 +23,9 @@ def format_plan_summary(plan: PlanRecord, tasks: list[TaskRecord]) -> str:
     skipped = sum(1 for t in tasks if t.status == TaskStatus.SKIPPED)
     pct = int(done / total * 100) if total else 0
 
+    mode_tag = f" [{plan.mode}]" if plan.mode != "standard" else ""
     lines = [
-        f"## Plan: {plan.name}",
+        f"## Plan: {plan.name}{mode_tag}",
         f"**ID:** `{plan.id}`",
         f"**Project:** {plan.project}",
         f"**Progress:** {done}/{total} tasks ({pct}%)",
@@ -38,14 +39,24 @@ def format_plan_summary(plan: PlanRecord, tasks: list[TaskRecord]) -> str:
             next_task_id = t.id
             break
 
+    # Show size column only if any task has non-default size
+    has_sizes = any(t.size != TaskSize.MEDIUM for t in tasks)
+
     lines.append("### Tasks")
     lines.append("")
-    lines.append("| # | Task | ID | Status |")
-    lines.append("|---|------|----|--------|")
+    if has_sizes:
+        lines.append("| # | Task | ID | Size | Status |")
+        lines.append("|---|------|----|------|--------|")
+    else:
+        lines.append("| # | Task | ID | Status |")
+        lines.append("|---|------|----|--------|")
     for t in tasks:
         icon = _STATUS_ICONS.get(t.status, "?")
         marker = " **<-- next**" if t.id == next_task_id else ""
-        lines.append(f"| {t.seq} | {t.title}{marker} | `{t.id[:12]}` | {icon} |")
+        if has_sizes:
+            lines.append(f"| {t.seq} | {t.title}{marker} | `{t.id[:12]}` | {t.size.value} | {icon} |")
+        else:
+            lines.append(f"| {t.seq} | {t.title}{marker} | `{t.id[:12]}` | {icon} |")
     lines.append("")
     lines.append("*Use the `ID` column values for `morpheus_advance(task_id, ...)`*")
 
@@ -92,16 +103,17 @@ def format_status(
 
 def format_advance_success(phase: Phase, task: TaskRecord) -> str:
     """Format a successful phase advance."""
+    size_note = f" [{task.size.value}]" if task.size != TaskSize.MEDIUM else ""
     phase_idx = list(Phase).index(phase)
     phases = list(Phase)
     if phase_idx + 1 < len(phases):
         next_phase = phases[phase_idx + 1]
         return (
-            f"**{phase.value}** gate passed for task {task.seq}. {task.title}\n\n"
+            f"**{phase.value}** gate passed for task {task.seq}.{size_note} {task.title}\n\n"
             f"Next phase: **{next_phase.value}**"
         )
     return (
-        f"**{phase.value}** gate passed for task {task.seq}. {task.title}\n\n"
+        f"**{phase.value}** gate passed for task {task.seq}.{size_note} {task.title}\n\n"
         f"Task complete."
     )
 
@@ -120,9 +132,15 @@ def format_close_summary(
     failed = sum(1 for t in tasks if t.status == TaskStatus.FAILED)
     skipped = sum(1 for t in tasks if t.status == TaskStatus.SKIPPED)
 
+    # Size distribution
+    sizes = {s: sum(1 for t in tasks if t.size == s) for s in TaskSize}
+    size_parts = [f"{s.value}: {n}" for s, n in sizes.items() if n > 0]
+    size_line = f"**Task sizes:** {', '.join(size_parts)}\n" if len(size_parts) > 1 else ""
+
     return (
         f"## Plan Complete: {plan.name}\n\n"
         f"**Result:** {done}/{total} tasks done, "
         f"{failed} failed, {skipped} skipped\n"
+        f"{size_line}"
         f"**Closed at:** {plan.closed_at.isoformat() if plan.closed_at else 'N/A'}"
     )
