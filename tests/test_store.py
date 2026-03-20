@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from morpheus_mcp.core.store import MorpheusStore
-from morpheus_mcp.models.enums import Phase, PhaseStatus, PlanStatus, TaskStatus
+from morpheus_mcp.models.enums import Phase, PhaseStatus, PlanStatus, TaskSize, TaskStatus
 from morpheus_mcp.models.plan import PhaseRecord, PlanRecord, TaskRecord
 
 
@@ -156,6 +156,37 @@ class TestTaskCRUD:
         store.conn.execute("DELETE FROM plans WHERE id = ?", (sample_plan_record.id,))
         store.conn.commit()
         assert store.get_tasks(sample_plan_record.id) == []
+
+    def test_save_and_get_with_size(self, store, sample_plan_record):
+        """Tasks persist size field correctly."""
+        store.save_plan(sample_plan_record)
+        task = TaskRecord(
+            plan_id=sample_plan_record.id, seq=1, title="Small",
+            size=TaskSize.SMALL,
+        )
+        store.save_task(task)
+        retrieved = store.get_task(task.id)
+        assert retrieved.size == TaskSize.SMALL
+
+    def test_size_defaults_to_medium(self, store, sample_plan_record):
+        """Tasks without explicit size default to MEDIUM."""
+        store.save_plan(sample_plan_record)
+        task = TaskRecord(plan_id=sample_plan_record.id, seq=1, title="Default")
+        store.save_task(task)
+        retrieved = store.get_task(task.id)
+        assert retrieved.size == TaskSize.MEDIUM
+
+    def test_size_roundtrip_all_values(self, store, sample_plan_record):
+        """All TaskSize values roundtrip through the store."""
+        store.save_plan(sample_plan_record)
+        for i, size in enumerate(TaskSize, start=1):
+            task = TaskRecord(
+                plan_id=sample_plan_record.id, seq=i, title=f"Size {size.value}",
+                size=size,
+            )
+            store.save_task(task)
+            retrieved = store.get_task(task.id)
+            assert retrieved.size == size
 
 
 class TestPhaseCRUD:

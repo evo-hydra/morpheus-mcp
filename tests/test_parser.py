@@ -7,7 +7,7 @@ import json
 import pytest
 
 from morpheus_mcp.core.parser import parse_plan_file
-from morpheus_mcp.models.enums import TaskStatus
+from morpheus_mcp.models.enums import TaskSize, TaskStatus
 
 
 class TestParsePlanFile:
@@ -68,6 +68,20 @@ class TestParsePlanFile:
         f.write_text("---\nname: Empty\n---\n\nJust text.\n")
         with pytest.raises(ValueError, match="No task sections"):
             parse_plan_file(f)
+
+    def test_task_size_parsing(self, sample_plan_with_sizes_file):
+        """Size strings map to TaskSize enum."""
+        _, tasks = parse_plan_file(sample_plan_with_sizes_file)
+        assert tasks[0].size == TaskSize.SMALL
+        assert tasks[1].size == TaskSize.MEDIUM  # default when omitted
+        assert tasks[2].size == TaskSize.LARGE
+        assert tasks[3].size == TaskSize.MEDIUM  # invalid falls back to medium
+
+    def test_task_size_default(self, sample_plan_file):
+        """Tasks without size field default to MEDIUM."""
+        _, tasks = parse_plan_file(sample_plan_file)
+        for task in tasks:
+            assert task.size == TaskSize.MEDIUM
 
     def test_single_file_task(self, tmp_path):
         """Tasks with a single file parse correctly."""

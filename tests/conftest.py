@@ -35,6 +35,41 @@ test_command: "python3 -m pytest tests/ -v"
 - **status**: done
 """
 
+SAMPLE_PLAN_WITH_SIZES_MD = """\
+---
+name: Sized Plan
+project: /tmp/sized
+test_command: "echo ok"
+---
+
+## 1. Small task
+- **files**: src/small.py
+- **do**: Small change
+- **done-when**: Done
+- **status**: pending
+- **size**: small
+
+## 2. Medium task (default)
+- **files**: src/medium.py
+- **do**: Medium change
+- **done-when**: Done
+- **status**: pending
+
+## 3. Large task
+- **files**: src/large.py
+- **do**: Large change
+- **done-when**: Done
+- **status**: pending
+- **size**: large
+
+## 4. Invalid size task
+- **files**: src/invalid.py
+- **do**: Invalid size
+- **done-when**: Done
+- **status**: pending
+- **size**: huge
+"""
+
 SAMPLE_PLAN_NO_GRADE_MD = """\
 ---
 name: Config Plan
@@ -72,6 +107,14 @@ def sample_plan_no_grade_file(tmp_path):
     """Write sample plan with grade=false to a temp file."""
     plan_file = tmp_path / "no-grade-plan.md"
     plan_file.write_text(SAMPLE_PLAN_NO_GRADE_MD)
+    return plan_file
+
+
+@pytest.fixture
+def sample_plan_with_sizes_file(tmp_path):
+    """Write sample plan with task sizes to a temp file."""
+    plan_file = tmp_path / "sized-plan.md"
+    plan_file.write_text(SAMPLE_PLAN_WITH_SIZES_MD)
     return plan_file
 
 
