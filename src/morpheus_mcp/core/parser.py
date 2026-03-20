@@ -6,7 +6,7 @@ import json
 import re
 from pathlib import Path
 
-from morpheus_mcp.models.enums import PlanStatus, TaskStatus
+from morpheus_mcp.models.enums import PlanStatus, TaskSize, TaskStatus
 from morpheus_mcp.models.plan import PlanRecord, TaskRecord
 
 # Frontmatter: content between --- markers at the top of the file
@@ -119,6 +119,13 @@ def parse_plan_file(path: str | Path) -> tuple[PlanRecord, list[TaskRecord]]:
         except ValueError:
             status = TaskStatus.PENDING
 
+        # Map size string to enum
+        size_raw = fields.get("size", "medium").strip().lower()
+        try:
+            size = TaskSize(size_raw)
+        except ValueError:
+            size = TaskSize.MEDIUM
+
         task = TaskRecord(
             plan_id=plan.id,
             seq=seq,
@@ -127,6 +134,7 @@ def parse_plan_file(path: str | Path) -> tuple[PlanRecord, list[TaskRecord]]:
             do_text=fields.get("do", ""),
             done_when=fields.get("done-when", ""),
             status=status,
+            size=size,
         )
         tasks.append(task)
 
