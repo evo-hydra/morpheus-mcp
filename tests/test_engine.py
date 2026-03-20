@@ -12,7 +12,7 @@ from morpheus_mcp.core.engine import (
     init_plan,
     validate_evidence,
 )
-from morpheus_mcp.models.enums import Phase, PhaseStatus, PlanStatus, TaskStatus
+from morpheus_mcp.models.enums import Phase, PhaseStatus, PlanStatus, TaskSize, TaskStatus
 from morpheus_mcp.models.plan import PlanRecord, TaskRecord
 
 
@@ -111,6 +111,77 @@ class TestValidateEvidence:
         """ADVANCE accepts with knowledge_gate."""
         r = validate_evidence(Phase.ADVANCE, {"knowledge_gate": "nothing_surprised"})
         assert r.passed is True
+
+
+class TestSizeAwareGates:
+    """Tests for task size-based gate relaxation/enforcement."""
+
+    def test_small_code_skips_fdmc(self):
+        """SMALL tasks skip fdmc_preflight requirement."""
+        r = validate_evidence(Phase.CODE, {}, task_size=TaskSize.SMALL)
+        assert r.passed is True
+
+    def test_small_commit_skips_seraph(self):
+        """SMALL tasks skip seraph_id requirement."""
+        r = validate_evidence(Phase.COMMIT, {}, task_size=TaskSize.SMALL)
+        assert r.passed is True
+
+    def test_small_advance_skips_knowledge(self):
+        """SMALL tasks skip knowledge_gate requirement."""
+        r = validate_evidence(Phase.ADVANCE, {}, task_size=TaskSize.SMALL)
+        assert r.passed is True
+
+    def test_small_test_still_required(self):
+        """SMALL tasks still require build_verified."""
+        r = validate_evidence(Phase.TEST, {}, task_size=TaskSize.SMALL)
+        assert r.passed is False
+
+    def test_small_grade_still_required(self):
+        """SMALL tasks still require tests_passed."""
+        r = validate_evidence(Phase.GRADE, {}, task_size=TaskSize.SMALL)
+        assert r.passed is False
+
+    def test_medium_unchanged(self):
+        """MEDIUM tasks behave identically to default (CODE requires fdmc)."""
+        r = validate_evidence(Phase.CODE, {}, task_size=TaskSize.MEDIUM)
+        assert r.passed is False
+        assert "fdmc_preflight" in r.message
+
+    def test_large_requires_seraph_even_grade_disabled(self):
+        """LARGE tasks require seraph_id even when grade is disabled."""
+        r = validate_evidence(
+            Phase.COMMIT, {}, grade_enabled=False, task_size=TaskSize.LARGE,
+        )
+        assert r.passed is False
+        assert "seraph_id" in r.message
+
+    def test_large_accepts_seraph(self):
+        """LARGE tasks accept seraph_id normally."""
+        r = validate_evidence(
+            Phase.COMMIT, {"seraph_id": "abc123"}, task_size=TaskSize.LARGE,
+        )
+        assert r.passed is True
+
+    def test_small_full_lifecycle(self, store, sample_plan_record):
+        """SMALL tasks can complete the full lifecycle with minimal evidence."""
+        store.save_plan(sample_plan_record)
+        task = TaskRecord(
+            plan_id=sample_plan_record.id, seq=1, title="Small",
+            size=TaskSize.SMALL,
+        )
+        store.save_task(task)
+
+        # Walk through all phases with minimal evidence
+        advance(store, task.id, Phase.CHECK, {})
+        advance(store, task.id, Phase.CODE, {})  # no fdmc needed
+        advance(store, task.id, Phase.TEST, {"build_verified": "ok"})
+        advance(store, task.id, Phase.GRADE, {"tests_passed": "ok"})
+        advance(store, task.id, Phase.COMMIT, {})  # no seraph needed
+        result, _ = advance(store, task.id, Phase.ADVANCE, {})  # no knowledge_gate needed
+        assert result.passed is True
+
+        retrieved = store.get_task(task.id)
+        assert retrieved.status == TaskStatus.DONE
 
 
 class TestInitPlan:
