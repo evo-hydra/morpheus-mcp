@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from morpheus_mcp.core.store import MorpheusStore
-from morpheus_mcp.models.enums import Phase, PhaseStatus, PlanStatus, TaskStatus
+from morpheus_mcp.models.enums import Phase, PhaseStatus, PlanStatus, TaskSize, TaskStatus
 from morpheus_mcp.models.plan import PhaseRecord, PlanRecord, TaskRecord
 
 # Gate definitions: what evidence each phase requires before advancing.
@@ -53,6 +53,7 @@ def validate_evidence(
     phase: Phase,
     evidence: dict,
     grade_enabled: bool = True,
+    task_size: TaskSize = TaskSize.MEDIUM,
 ) -> GateResult:
     """Validate that evidence satisfies the gate requirements for a phase.
 
@@ -60,6 +61,7 @@ def validate_evidence(
         phase: The phase being advanced to completion.
         evidence: Dict of evidence key-value pairs.
         grade_enabled: Whether the plan has grading enabled.
+        task_size: Task size tier — affects gate strictness.
 
     Returns:
         GateResult with passed=True if gate is satisfied, or
@@ -71,9 +73,20 @@ def validate_evidence(
 
     missing: list[str] = []
     for key, description in required.items():
-        # Special case: COMMIT gate — seraph_id not required if grade disabled
+        # SMALL tasks: skip fdmc_preflight, seraph_id, and knowledge_gate
+        if task_size == TaskSize.SMALL:
+            if phase == Phase.CODE and key == "fdmc_preflight":
+                continue
+            if phase == Phase.COMMIT and key == "seraph_id":
+                continue
+            if phase == Phase.ADVANCE and key == "knowledge_gate":
+                continue
+
+        # MEDIUM tasks: COMMIT gate — seraph_id not required if grade disabled
         if phase == Phase.COMMIT and key == "seraph_id" and not grade_enabled:
-            continue
+            # LARGE tasks override: always require seraph_id
+            if task_size != TaskSize.LARGE:
+                continue
 
         if key not in evidence or not evidence[key]:
             missing.append(f"'{key}': {description}")
@@ -85,7 +98,7 @@ def validate_evidence(
             message=f"Gate '{phase.value}' requires:\n  - {missing_str}",
         )
 
-    # Validate FDMC preflight structure (CODE gate)
+    # Validate FDMC preflight structure (CODE gate) — skipped for SMALL tasks
     if phase == Phase.CODE and "fdmc_preflight" in evidence:
         fdmc = evidence["fdmc_preflight"]
         if isinstance(fdmc, str):
@@ -195,7 +208,9 @@ def advance(
             ), None
 
     # Validate the gate evidence
-    result = validate_evidence(phase, evidence, grade_enabled=grade_enabled)
+    result = validate_evidence(
+        phase, evidence, grade_enabled=grade_enabled, task_size=task.size,
+    )
     if not result.passed:
         # Record the rejection
         rejected = PhaseRecord(
