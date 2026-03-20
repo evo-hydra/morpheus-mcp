@@ -71,7 +71,12 @@ def create_server(config=None):
                 phases_by_task = {
                     t.id: store.get_phases(t.id) for t in tasks
                 }
-                return format_status(plan, tasks, phases_by_task)
+                # Include progress for active tasks
+                active = [t for t in tasks if t.status.value == "in_progress"]
+                progress_by_task = {
+                    t.id: store.get_progress(t.id) for t in active
+                }
+                return format_status(plan, tasks, phases_by_task, progress_by_task)
         except (sqlite3.Error, OSError) as exc:
             return f"Error: {exc}"
 

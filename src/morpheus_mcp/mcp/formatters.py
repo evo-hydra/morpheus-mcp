@@ -60,8 +60,9 @@ def format_status(
     plan: PlanRecord,
     tasks: list[TaskRecord],
     phases_by_task: dict[str, list[PhaseRecord]],
+    progress_by_task: dict[str, list[tuple[str, str, str]]] | None = None,
 ) -> str:
-    """Format detailed status with phase information."""
+    """Format detailed status with phase and progress information."""
     lines = [format_plan_summary(plan, tasks), ""]
 
     # Show phase detail for the active task
@@ -75,6 +76,16 @@ def format_status(
                 lines.append(f"  - {p.phase.value}: {p.status.value}")
         else:
             lines.append("  No phases recorded yet")
+
+        # Show recent progress entries
+        if progress_by_task:
+            entries = progress_by_task.get(t.id, [])
+            if entries:
+                lines.append("")
+                lines.append("**Recent progress:**")
+                for _id, message, created_at in entries:
+                    ts = created_at.split("T")[1][:8] if "T" in created_at else created_at
+                    lines.append(f"  - [{ts}] {message}")
 
     return "\n".join(lines)
 
