@@ -94,6 +94,25 @@ class TestMorpheusAdvance:
         assert "REJECTED" in result or "not found" in result
 
 
+class TestSkipReasonMCP:
+    def test_advance_with_skip_reason(self, server, plan_file):
+        """morpheus_advance accepts skip_reason and passes the gate."""
+        init_result = server._tool_manager._tools["morpheus_init"].fn(str(plan_file))
+        # Extract first task_id
+        for line in init_result.splitlines():
+            if "Task one" in line:
+                task_id = line.split("`")[1]
+                break
+
+        # CHECK — no gate
+        server._tool_manager._tools["morpheus_advance"].fn(task_id, "CHECK")
+        # CODE — skip_reason instead of sibling_read
+        result = server._tool_manager._tools["morpheus_advance"].fn(
+            task_id, "CODE", "{}", "no siblings in greenfield project",
+        )
+        assert "gate passed" in result
+
+
 class TestMorpheusClose:
     def test_close_nonexistent(self, server):
         """morpheus_close returns error for unknown plan."""

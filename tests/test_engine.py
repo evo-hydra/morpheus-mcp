@@ -421,6 +421,54 @@ class TestSimplifiedKnowledgeGate:
         assert r.passed is True
 
 
+class TestSkipReason:
+    """Tests for skip_reason gate bypass."""
+
+    def test_skip_reason_bypasses_missing_evidence(self, store, sample_plan_record):
+        """skip_reason fills missing keys so the gate passes."""
+        store.save_plan(sample_plan_record)
+        task = TaskRecord(plan_id=sample_plan_record.id, seq=1, title="T1")
+        store.save_task(task)
+
+        advance(store, task.id, Phase.CHECK, {})
+        result, _ = advance(store, task.id, Phase.CODE, {}, skip_reason="greenfield — no diff")
+        assert result.passed is True
+
+    def test_without_skip_reason_enforces_gates(self):
+        """Without skip_reason, gates are enforced normally."""
+        r = validate_evidence(Phase.COMMIT, {})
+        assert r.passed is False
+
+    def test_skip_reason_on_check_is_noop(self, store, sample_plan_record):
+        """CHECK has no gate, so skip_reason changes nothing."""
+        store.save_plan(sample_plan_record)
+        task = TaskRecord(plan_id=sample_plan_record.id, seq=1, title="T1")
+        store.save_task(task)
+
+        result, _ = advance(store, task.id, Phase.CHECK, {}, skip_reason="test")
+        assert result.passed is True
+
+    def test_skip_reason_with_advance_function(self, store, sample_plan_record):
+        """skip_reason flows through advance() to validate_evidence()."""
+        store.save_plan(sample_plan_record)
+        task = TaskRecord(plan_id=sample_plan_record.id, seq=1, title="T1")
+        store.save_task(task)
+
+        # Walk to COMMIT phase
+        advance(store, task.id, Phase.CHECK, {})
+        advance(store, task.id, Phase.CODE, {"sibling_read": "test.py"})
+        advance(store, task.id, Phase.TEST, {"build_verified": "ok"})
+        advance(store, task.id, Phase.GRADE, {"tests_passed": "ok", "fdmc_review": "ok"})
+
+        # COMMIT with skip_reason instead of seraph_id
+        result, phase_record = advance(
+            store, task.id, Phase.COMMIT, {}, skip_reason="greenfield — no diff for Seraph",
+        )
+        assert result.passed is True
+        assert phase_record is not None
+        assert "skipped:" in phase_record.evidence_json
+
+
 class TestBatchAdvance:
     """Tests for advance_batch."""
 
