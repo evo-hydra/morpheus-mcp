@@ -391,8 +391,22 @@ class TestSimplifiedKnowledgeGate:
         assert r.passed is False
         assert "knowledge_reason" in r.message
 
-    def test_accept_sentinel_id(self):
-        """ADVANCE still accepts sentinel solution IDs."""
+    def test_reject_nothing_surprised_without_reason(self):
+        """ADVANCE rejects 'nothing_surprised' without knowledge_reason."""
+        r = validate_evidence(Phase.ADVANCE, {"knowledge_gate": "nothing_surprised"})
+        assert r.passed is False
+        assert "knowledge_reason" in r.message
+
+    def test_accept_nothing_surprised_with_reason(self):
+        """ADVANCE accepts 'nothing_surprised' with knowledge_reason."""
+        r = validate_evidence(Phase.ADVANCE, {
+            "knowledge_gate": "nothing_surprised",
+            "knowledge_reason": "followed Task 1 pattern exactly",
+        })
+        assert r.passed is True
+
+    def test_accept_sentinel_id_without_reason(self):
+        """ADVANCE accepts sentinel IDs without requiring knowledge_reason."""
         r = validate_evidence(Phase.ADVANCE, {"knowledge_gate": "sol_abc123"})
         assert r.passed is True
 
