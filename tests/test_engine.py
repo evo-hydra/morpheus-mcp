@@ -110,7 +110,7 @@ class TestValidateEvidence:
 
     def test_advance_accept(self):
         """ADVANCE accepts with knowledge_gate."""
-        r = validate_evidence(Phase.ADVANCE, {"knowledge_gate": "nothing_surprised"})
+        r = validate_evidence(Phase.ADVANCE, {"knowledge_gate": "nothing_surprised", "knowledge_reason": "followed established pattern"})
         assert r.passed is True
 
     # --- Rejection message format tests ---
@@ -329,7 +329,7 @@ class TestAdvance:
         advance(store, task.id, Phase.TEST, {"build_verified": "ok"})
         advance(store, task.id, Phase.GRADE, _grade_evidence())
         advance(store, task.id, Phase.COMMIT, {"seraph_id": "abc123"})
-        advance(store, task.id, Phase.ADVANCE, {"knowledge_gate": "nothing_surprised"})
+        advance(store, task.id, Phase.ADVANCE, {"knowledge_gate": "nothing_surprised", "knowledge_reason": "followed established pattern"})
 
         retrieved = store.get_task(task.id)
         assert retrieved.status == TaskStatus.DONE
@@ -377,10 +377,19 @@ class TestSimplifiedKnowledgeGate:
         r = validate_evidence(Phase.ADVANCE, {"knowledge_gate": "true"})
         assert r.passed is True
 
-    def test_accept_false_string(self):
-        """ADVANCE accepts 'false' as knowledge_gate (conscious fast-pass)."""
-        r = validate_evidence(Phase.ADVANCE, {"knowledge_gate": "false"})
+    def test_accept_false_string_with_reason(self):
+        """ADVANCE accepts 'false' as knowledge_gate when reason provided."""
+        r = validate_evidence(Phase.ADVANCE, {
+            "knowledge_gate": "false",
+            "knowledge_reason": "pure config change, no new patterns",
+        })
         assert r.passed is True
+
+    def test_reject_false_string_without_reason(self):
+        """ADVANCE rejects 'false' without knowledge_reason."""
+        r = validate_evidence(Phase.ADVANCE, {"knowledge_gate": "false"})
+        assert r.passed is False
+        assert "knowledge_reason" in r.message
 
     def test_accept_sentinel_id(self):
         """ADVANCE still accepts sentinel solution IDs."""

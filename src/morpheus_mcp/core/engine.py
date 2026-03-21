@@ -135,6 +135,25 @@ def validate_evidence(
             message=f"Gate '{phase.value}' requires:\n  - {missing_str}{example_line}",
         )
 
+    # ADVANCE phase: "nothing_surprised" and "false" require a knowledge_reason
+    _REASON_REQUIRED_VALUES = {"nothing_surprised", "false"}
+    if (
+        phase == Phase.ADVANCE
+        and task_size != TaskSize.SMALL
+        and evidence.get("knowledge_gate", "") in _REASON_REQUIRED_VALUES
+    ):
+        reason = evidence.get("knowledge_reason", "")
+        if not reason or not reason.strip():
+            example = GATE_EXAMPLES.get(Phase.ADVANCE, "")
+            return GateResult(
+                passed=False,
+                message=(
+                    f"knowledge_gate='{evidence['knowledge_gate']}' requires a "
+                    f"'knowledge_reason' explaining why nothing was learned.\n\n"
+                    f"Expected format: {example}"
+                ),
+            )
+
     return GateResult(passed=True, message="Gate passed")
 
 

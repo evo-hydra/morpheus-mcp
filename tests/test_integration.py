@@ -92,7 +92,7 @@ def test_full_lifecycle(tmp_path, integration_plan):
 
         # Phase: ADVANCE (requires knowledge_gate)
         result, phase = advance(
-            store, task1.id, Phase.ADVANCE, {"knowledge_gate": "nothing_surprised"}
+            store, task1.id, Phase.ADVANCE, {"knowledge_gate": "nothing_surprised", "knowledge_reason": "followed established pattern"}
         )
         assert result.passed is True
 
@@ -112,7 +112,7 @@ def test_full_lifecycle(tmp_path, integration_plan):
         advance(store, task2.id, Phase.TEST, {"build_verified": "ok"})
         advance(store, task2.id, Phase.GRADE, _grade_ev())
         advance(store, task2.id, Phase.COMMIT, {"seraph_id": "def789"})
-        advance(store, task2.id, Phase.ADVANCE, {"knowledge_gate": "nothing_surprised"})
+        advance(store, task2.id, Phase.ADVANCE, {"knowledge_gate": "nothing_surprised", "knowledge_reason": "followed established pattern"})
 
         # No more pending tasks
         assert store.get_next_pending_task(plan_id) is None
@@ -276,7 +276,7 @@ def test_new_features_integration(tmp_path):
         assert result.passed is False  # LARGE always requires seraph
         result, _ = advance(store, t3.id, Phase.COMMIT, {"seraph_id": "def456"})
         assert result.passed is True
-        advance(store, t3.id, Phase.ADVANCE, {"knowledge_gate": "nothing_surprised"})
+        advance(store, t3.id, Phase.ADVANCE, {"knowledge_gate": "nothing_surprised", "knowledge_reason": "followed established pattern"})
 
         assert store.get_task(t3.id).status == TaskStatus.DONE
 
