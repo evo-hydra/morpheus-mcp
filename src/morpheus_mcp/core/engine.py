@@ -36,6 +36,16 @@ GATES: dict[Phase, dict[str, str]] = {
     },
 }
 
+# Example evidence for each gated phase — shown in rejection messages so agents
+# know the exact format expected, rather than guessing from key names alone.
+GATE_EXAMPLES: dict[Phase, str] = {
+    Phase.CODE: '{"sibling_read": "src/core/parser.py"}',
+    Phase.TEST: '{"build_verified": "python -m py_compile src/main.py — OK"}',
+    Phase.GRADE: '{"tests_passed": "12 passed, 0 failed", "fdmc_review": "Consistent — matched existing pattern"}',
+    Phase.COMMIT: '{"seraph_id": "a1b2c3d4"}',
+    Phase.ADVANCE: '{"knowledge_gate": "nothing_surprised", "knowledge_reason": "followed established pattern from Task 1"}',
+}
+
 # Phase ordering for sequence validation
 _PHASE_ORDER = list(Phase)
 
@@ -118,9 +128,11 @@ def validate_evidence(
 
     if missing:
         missing_str = "\n  - ".join(missing)
+        example = GATE_EXAMPLES.get(phase, "")
+        example_line = f"\n\nExpected format: {example}" if example else ""
         return GateResult(
             passed=False,
-            message=f"Gate '{phase.value}' requires:\n  - {missing_str}",
+            message=f"Gate '{phase.value}' requires:\n  - {missing_str}{example_line}",
         )
 
     return GateResult(passed=True, message="Gate passed")
