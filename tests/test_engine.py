@@ -113,6 +113,38 @@ class TestValidateEvidence:
         r = validate_evidence(Phase.ADVANCE, {"knowledge_gate": "nothing_surprised"})
         assert r.passed is True
 
+    # --- Rejection message format tests ---
+
+    def test_code_rejection_includes_example(self):
+        """CODE rejection message includes expected format example."""
+        r = validate_evidence(Phase.CODE, {})
+        assert "Expected format:" in r.message
+        assert '"sibling_read"' in r.message
+
+    def test_test_rejection_includes_example(self):
+        """TEST rejection message includes expected format example."""
+        r = validate_evidence(Phase.TEST, {})
+        assert "Expected format:" in r.message
+        assert '"build_verified"' in r.message
+
+    def test_grade_rejection_includes_example(self):
+        """GRADE rejection message includes expected format example."""
+        r = validate_evidence(Phase.GRADE, {})
+        assert "Expected format:" in r.message
+        assert '"tests_passed"' in r.message
+
+    def test_commit_rejection_includes_example(self):
+        """COMMIT rejection message includes expected format example."""
+        r = validate_evidence(Phase.COMMIT, {})
+        assert "Expected format:" in r.message
+        assert '"seraph_id"' in r.message
+
+    def test_advance_rejection_includes_example(self):
+        """ADVANCE rejection message includes expected format example."""
+        r = validate_evidence(Phase.ADVANCE, {})
+        assert "Expected format:" in r.message
+        assert '"knowledge_gate"' in r.message
+
 
 class TestSizeAwareGates:
     """Tests for task size-based gate relaxation/enforcement."""
