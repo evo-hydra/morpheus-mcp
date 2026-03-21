@@ -81,7 +81,7 @@ def create_server(config=None):
             return f"Error: {exc}"
 
     @mcp.tool()
-    def morpheus_advance(task_id: str, phase: str, evidence: str = "{}") -> str:
+    def morpheus_advance(task_id: str, phase: str, evidence: str = "{}", skip_reason: str = "") -> str:
         """Advance a task through a phase gate with evidence.
 
         Validates that the evidence satisfies the gate requirements.
@@ -92,6 +92,9 @@ def create_server(config=None):
             task_id: The task ID to advance
             phase: Phase name: CHECK, CODE, TEST, GRADE, COMMIT, or ADVANCE
             evidence: JSON string with evidence key-value pairs
+            skip_reason: When provided, fills missing evidence keys to bypass
+                the gate. Use for intentional skips (e.g., "greenfield — no
+                diff for Seraph"). Recorded in evidence for auditability.
         """
         from morpheus_mcp.core.engine import advance
         from morpheus_mcp.core.store import MorpheusStore
@@ -114,7 +117,7 @@ def create_server(config=None):
 
         try:
             with MorpheusStore(_config.db_path) as store:
-                result, phase_record = advance(store, task_id, phase_enum, evidence_dict)
+                result, phase_record = advance(store, task_id, phase_enum, evidence_dict, skip_reason=skip_reason)
 
                 if not result.passed:
                     return format_advance_rejection(phase_enum, result.message)

@@ -64,6 +64,7 @@ def validate_evidence(
     grade_enabled: bool = True,
     task_size: TaskSize = TaskSize.MEDIUM,
     plan_mode: str = "standard",
+    skip_reason: str = "",
 ) -> GateResult:
     """Validate that evidence satisfies the gate requirements for a phase.
 
@@ -73,6 +74,9 @@ def validate_evidence(
         grade_enabled: Whether the plan has grading enabled.
         task_size: Task size tier — affects gate strictness.
         plan_mode: Plan mode — 'greenfield' relaxes sibling_read.
+        skip_reason: When provided, fills missing evidence keys with
+            "skipped: {reason}" so the gate passes. Recorded in evidence
+            for auditability.
 
     Returns:
         GateResult with passed=True if gate is satisfied, or
@@ -99,6 +103,13 @@ def validate_evidence(
                     consistent = {}
             if isinstance(consistent, dict) and "sibling_read" in consistent:
                 evidence = {**evidence, "sibling_read": consistent["sibling_read"]}
+
+    # skip_reason: fill missing evidence keys so the gate passes, with an auditable value
+    if skip_reason:
+        skip_value = f"skipped: {skip_reason}"
+        for key in required:
+            if key not in evidence or not evidence[key]:
+                evidence = {**evidence, key: skip_value}
 
     missing: list[str] = []
     for key, description in required.items():
@@ -184,6 +195,7 @@ def advance(
     task_id: str,
     phase: Phase,
     evidence: dict,
+    skip_reason: str = "",
 ) -> tuple[GateResult, PhaseRecord | None]:
     """Validate gate and record phase completion.
 
@@ -192,6 +204,7 @@ def advance(
         task_id: The task being advanced.
         phase: The phase being completed.
         evidence: Evidence dict for gate validation.
+        skip_reason: When provided, fills missing evidence to bypass the gate.
 
     Returns:
         Tuple of (GateResult, PhaseRecord if gate passed else None).
@@ -228,7 +241,7 @@ def advance(
     plan_mode = plan.mode if plan else "standard"
     result = validate_evidence(
         phase, evidence, grade_enabled=grade_enabled, task_size=task.size,
-        plan_mode=plan_mode,
+        plan_mode=plan_mode, skip_reason=skip_reason,
     )
     if not result.passed:
         # Record the rejection
