@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "morpheus-mcp"
-version = "0.1.0"
+version = "0.2.0"
 description = "Plan state management and phase gate enforcement for AI dev loops via MCP"
 readme = "README.md"
 license = {text = "MIT"}
