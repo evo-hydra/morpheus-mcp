@@ -34,15 +34,16 @@ def plan_file(tmp_path):
 
 
 class TestCreateServer:
-    def test_has_6_tools(self, server):
-        """Server registers exactly 6 tools."""
+    def test_has_7_tools(self, server):
+        """Server registers exactly 7 tools."""
         tools = [t.name for t in server._tool_manager.list_tools()]
-        assert len(tools) == 6
+        assert len(tools) == 7
         assert "morpheus_init" in tools
         assert "morpheus_status" in tools
         assert "morpheus_advance" in tools
         assert "morpheus_advance_batch" in tools
         assert "morpheus_progress" in tools
+        assert "morpheus_version" in tools
         assert "morpheus_close" in tools
 
 
@@ -132,3 +133,27 @@ class TestMorpheusClose:
 
         result = server._tool_manager._tools["morpheus_close"].fn(plan_id)
         assert "Plan Complete" in result
+
+
+class TestMorpheusVersion:
+    def test_version_returns_json(self, server):
+        """morpheus_version returns valid JSON with expected fields."""
+        result = server._tool_manager._tools["morpheus_version"].fn()
+        data = json.loads(result)
+        assert "server_version" in data
+        assert "schema_version" in data
+        assert "python_version" in data
+
+    def test_version_matches_package(self, server):
+        """Server version matches __init__.py version."""
+        result = server._tool_manager._tools["morpheus_version"].fn()
+        data = json.loads(result)
+        from morpheus_mcp import __version__
+        assert data["server_version"] == __version__
+
+    def test_schema_version_matches_store(self, server):
+        """Schema version matches store constant."""
+        result = server._tool_manager._tools["morpheus_version"].fn()
+        data = json.loads(result)
+        from morpheus_mcp.core.store import SCHEMA_VERSION
+        assert data["schema_version"] == SCHEMA_VERSION

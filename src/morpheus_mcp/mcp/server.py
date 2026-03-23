@@ -1,4 +1,4 @@
-"""FastMCP server factory with 4 MCP tools."""
+"""FastMCP server factory with 7 MCP tools."""
 
 from __future__ import annotations
 
@@ -211,6 +211,23 @@ def create_server(config=None):
                 return format_close_summary(plan, tasks)
         except (sqlite3.Error, OSError) as exc:
             return f"Error: {exc}"
+
+    @mcp.tool()
+    def morpheus_version() -> str:
+        """Return Morpheus server version, plan schema version, and Python version.
+
+        No arguments required. Use for introspection and compatibility checks.
+        """
+        import sys
+
+        from morpheus_mcp import __version__
+        from morpheus_mcp.core.store import SCHEMA_VERSION
+
+        return json.dumps({
+            "server_version": __version__,
+            "schema_version": SCHEMA_VERSION,
+            "python_version": f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
+        })
 
     return mcp
 
