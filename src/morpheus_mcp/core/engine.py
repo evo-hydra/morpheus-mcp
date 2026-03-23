@@ -133,11 +133,18 @@ def validate_evidence(
 
     if missing:
         missing_str = "\n  - ".join(missing)
+        provided_keys = sorted(k for k in evidence if evidence[k])
+        provided_line = ", ".join(provided_keys) if provided_keys else "(none)"
+        expected_keys = ", ".join(required.keys())
         example = GATE_EXAMPLES.get(phase, "")
         example_line = f"\n\nExpected format: {example}" if example else ""
         return GateResult(
             passed=False,
-            message=f"Gate '{phase.value}' requires:\n  - {missing_str}{example_line}",
+            message=(
+                f"Gate '{phase.value}' expected keys: [{expected_keys}]. "
+                f"You provided: [{provided_line}]. "
+                f"Missing:\n  - {missing_str}{example_line}"
+            ),
         )
 
     # ADVANCE phase: "nothing_surprised" and "false" require a knowledge_reason

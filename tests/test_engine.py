@@ -145,6 +145,31 @@ class TestValidateEvidence:
         assert "Expected format:" in r.message
         assert '"knowledge_gate"' in r.message
 
+    # --- Provided-vs-expected key tests ---
+
+    def test_rejection_shows_provided_keys(self):
+        """Rejection message includes which keys the caller actually provided."""
+        r = validate_evidence(Phase.GRADE, {"tests_passed": "12 passed"})
+        assert r.passed is False
+        assert "You provided: [tests_passed]" in r.message
+        assert "expected keys: [tests_passed, fdmc_review]" in r.message
+        assert "fdmc_review" in r.message
+
+    def test_rejection_shows_none_when_empty(self):
+        """Rejection message shows '(none)' when no keys provided."""
+        r = validate_evidence(Phase.CODE, {})
+        assert "You provided: [(none)]" in r.message
+
+    def test_rejection_shows_all_provided_keys(self):
+        """Rejection message includes all provided keys even irrelevant ones."""
+        r = validate_evidence(Phase.GRADE, {
+            "tests_passed": "ok",
+            "extra_key": "bonus",
+        })
+        assert r.passed is False
+        assert "extra_key" in r.message
+        assert "tests_passed" in r.message
+
 
 class TestSizeAwareGates:
     """Tests for task size-based gate relaxation/enforcement."""
