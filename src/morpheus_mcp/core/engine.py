@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from typing import Any
 
 from morpheus_mcp.core.store import MorpheusStore
 from morpheus_mcp.models.enums import Phase, PhaseStatus, PlanStatus, TaskSize, TaskStatus
@@ -58,9 +59,13 @@ class GateResult:
     message: str
 
 
+# Named return type for advance() — provides type safety for callers.
+AdvanceResult = tuple[GateResult, PhaseRecord | None]
+
+
 def validate_evidence(
     phase: Phase,
-    evidence: dict,
+    evidence: dict[str, Any],
     grade_enabled: bool = True,
     task_size: TaskSize = TaskSize.MEDIUM,
     plan_mode: str = "standard",
@@ -183,9 +188,9 @@ def advance(
     store: MorpheusStore,
     task_id: str,
     phase: Phase,
-    evidence: dict,
+    evidence: dict[str, Any],
     skip_reason: str = "",
-) -> tuple[GateResult, PhaseRecord | None]:
+) -> AdvanceResult:
     """Validate gate and record phase completion.
 
     Args:
@@ -278,7 +283,7 @@ class BatchResult:
 
 def advance_batch(
     store: MorpheusStore,
-    advances: list[dict],
+    advances: list[dict[str, Any]],
 ) -> BatchResult:
     """Process multiple phase advances atomically.
 
