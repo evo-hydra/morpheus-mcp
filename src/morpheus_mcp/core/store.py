@@ -368,17 +368,17 @@ class MorpheusStore:
     def get_tasks(self, plan_id: str) -> list[TaskRecord]:
         """Get all tasks for a plan, ordered by sequence."""
         cur = self.conn.execute(
-            "SELECT * FROM tasks WHERE plan_id = ? ORDER BY seq", (plan_id,)
+            "SELECT id, plan_id, seq, title, files_json, do_text, done_when, status, size, claimed_by FROM tasks WHERE plan_id = ? ORDER BY seq", (plan_id,)
         )
         return [self._row_to_task(row) for row in cur.fetchall()]
 
     def get_task(self, task_id: str) -> TaskRecord | None:
         """Retrieve a single task by ID or prefix (min 8 chars)."""
-        cur = self.conn.execute("SELECT * FROM tasks WHERE id = ?", (task_id,))
+        cur = self.conn.execute("SELECT id, plan_id, seq, title, files_json, do_text, done_when, status, size, claimed_by FROM tasks WHERE id = ?", (task_id,))
         row = cur.fetchone()
         if row is None and len(task_id) >= 8:
             cur = self.conn.execute(
-                "SELECT * FROM tasks WHERE id LIKE ? LIMIT 1",
+                "SELECT id, plan_id, seq, title, files_json, do_text, done_when, status, size, claimed_by FROM tasks WHERE id LIKE ? LIMIT 1",
                 (task_id + "%",),
             )
             row = cur.fetchone()
@@ -397,7 +397,7 @@ class MorpheusStore:
     def get_next_pending_task(self, plan_id: str) -> TaskRecord | None:
         """Get the next pending task for a plan (lowest seq)."""
         cur = self.conn.execute(
-            "SELECT * FROM tasks WHERE plan_id = ? AND status = ? ORDER BY seq LIMIT 1",
+            "SELECT id, plan_id, seq, title, files_json, do_text, done_when, status, size, claimed_by FROM tasks WHERE plan_id = ? AND status = ? ORDER BY seq LIMIT 1",
             (plan_id, TaskStatus.PENDING.value),
         )
         row = cur.fetchone()
@@ -410,7 +410,7 @@ class MorpheusStore:
     ) -> list[TaskRecord]:
         """Get all tasks for a plan with a specific status, ordered by seq."""
         cur = self.conn.execute(
-            "SELECT * FROM tasks WHERE plan_id = ? AND status = ? ORDER BY seq",
+            "SELECT id, plan_id, seq, title, files_json, do_text, done_when, status, size, claimed_by FROM tasks WHERE plan_id = ? AND status = ? ORDER BY seq",
             (plan_id, status.value),
         )
         return [self._row_to_task(row) for row in cur.fetchall()]
