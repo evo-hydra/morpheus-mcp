@@ -286,3 +286,70 @@ def test_new_features_integration(tmp_path):
         # === CLOSE ===
         closed = close_plan(store, plan_id)
         assert closed.status == PlanStatus.COMPLETED
+
+
+def test_invalid_size_lifecycle(tmp_path):
+    """Full lifecycle works even when DB has invalid task size values.
+
+    This is the regression test for the 'None is not a valid TaskSize'
+    crash that prevented morpheus_advance from working during dogfooding.
+    """
+    config = MorpheusConfig.load(tmp_path / "data")
+
+    plan_file = tmp_path / "corrupt.md"
+    plan_file.write_text(
+        "---\n"
+        "name: Invalid Size Plan\n"
+        "project: /tmp/corrupt\n"
+        'test_command: "echo ok"\n'
+        "mode: greenfield\n"
+        "---\n\n"
+        "## 1. Task with valid size\n"
+        "- **files**: a.py\n"
+        "- **do**: Do A\n"
+        "- **done-when**: A done\n"
+        "- **status**: pending\n"
+        "- **size**: small\n\n"
+        "## 2. Task that will get corrupted\n"
+        "- **files**: b.py\n"
+        "- **do**: Do B\n"
+        "- **done-when**: B done\n"
+        "- **status**: pending\n"
+    )
+
+    plan, tasks = parse_plan_file(plan_file)
+
+    with MorpheusStore(config.db_path) as store:
+        plan_id = init_plan(store, plan, tasks)
+        t1, t2 = store.get_tasks(plan_id)
+
+        # Corrupt t2's size to an invalid string (simulating bad data)
+        store.conn.execute("UPDATE tasks SET size = 'bogus' WHERE id = ?", (t2.id,))
+        store.conn.commit()
+
+        # t1 (small, valid) should advance normally
+        advance(store, t1.id, Phase.CHECK, {})
+        advance(store, t1.id, Phase.CODE, {})
+        advance(store, t1.id, Phase.TEST, {"build_verified": "ok"})
+        result, _ = advance(store, t1.id, Phase.GRADE, {"tests_passed": "ok"})
+        assert result.passed is True
+        advance(store, t1.id, Phase.COMMIT, {})
+        advance(store, t1.id, Phase.ADVANCE, {})
+        assert store.get_task(t1.id).status == TaskStatus.DONE
+
+        # t2 (corrupted 'bogus' → defaults to MEDIUM) should still work
+        t2_reloaded = store.get_task(t2.id)
+        assert t2_reloaded.size == TaskSize.MEDIUM
+
+        advance(store, t2.id, Phase.CHECK, {})
+        # Greenfield mode relaxes sibling_read for MEDIUM
+        result, _ = advance(store, t2.id, Phase.CODE, {})
+        assert result.passed is True
+        advance(store, t2.id, Phase.TEST, {"build_verified": "ok"})
+        advance(store, t2.id, Phase.GRADE, {"tests_passed": "ok", "fdmc_review": "ok"})
+        advance(store, t2.id, Phase.COMMIT, {"seraph_id": "abc"})
+        advance(store, t2.id, Phase.ADVANCE, {"knowledge_gate": "true"})
+        assert store.get_task(t2.id).status == TaskStatus.DONE
+
+        closed = close_plan(store, plan_id)
+        assert closed.status == PlanStatus.COMPLETED
