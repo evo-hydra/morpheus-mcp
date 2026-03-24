@@ -91,6 +91,54 @@ def _parse_iso(s: str) -> datetime:
     return dt
 
 
+def _safe_parse_iso(value: str | None) -> datetime:
+    """Parse ISO datetime from DB, defaulting to now(UTC) on NULL or invalid."""
+    if value is None:
+        logger.warning("NULL datetime in DB row — defaulting to now(UTC)")
+        return datetime.now(timezone.utc)
+    try:
+        return _parse_iso(value)
+    except (ValueError, TypeError):
+        logger.warning("Invalid datetime %r in DB — defaulting to now(UTC)", value)
+        return datetime.now(timezone.utc)
+
+
+def _safe_task_status(value: str | None) -> TaskStatus:
+    """Parse TaskStatus from DB value, defaulting to PENDING on NULL or invalid."""
+    if value is None:
+        logger.warning("NULL task status in DB row — defaulting to PENDING")
+        return TaskStatus.PENDING
+    try:
+        return TaskStatus(value)
+    except ValueError:
+        logger.warning("Unknown task status %r in DB — defaulting to PENDING", value)
+        return TaskStatus.PENDING
+
+
+def _safe_phase(value: str | None) -> Phase:
+    """Parse Phase from DB value, defaulting to CHECK on NULL or invalid."""
+    if value is None:
+        logger.warning("NULL phase in DB row — defaulting to CHECK")
+        return Phase.CHECK
+    try:
+        return Phase(value)
+    except ValueError:
+        logger.warning("Unknown phase %r in DB — defaulting to CHECK", value)
+        return Phase.CHECK
+
+
+def _safe_phase_status(value: str | None) -> PhaseStatus:
+    """Parse PhaseStatus from DB value, defaulting to STARTED on NULL or invalid."""
+    if value is None:
+        logger.warning("NULL phase status in DB row — defaulting to STARTED")
+        return PhaseStatus.STARTED
+    try:
+        return PhaseStatus(value)
+    except ValueError:
+        logger.warning("Unknown phase status %r in DB — defaulting to STARTED", value)
+        return PhaseStatus.STARTED
+
+
 def _safe_task_size(value: str | None) -> TaskSize:
     """Parse TaskSize from DB value, defaulting to MEDIUM on NULL or invalid."""
     if value is None:
@@ -227,8 +275,8 @@ class MorpheusStore:
             mode=row[5],
             status=_safe_plan_status(row[6]),
             oil_change_due=bool(row[7]),
-            created_at=_parse_iso(row[8]),
-            closed_at=_parse_iso(row[9]) if row[9] else None,
+            created_at=_safe_parse_iso(row[8]),
+            closed_at=_safe_parse_iso(row[9]) if row[9] else None,
         )
 
     def save_plan(self, plan: PlanRecord) -> None:
@@ -312,7 +360,7 @@ class MorpheusStore:
             files_json=row[4],
             do_text=row[5],
             done_when=row[6],
-            status=TaskStatus(row[7]),
+            status=_safe_task_status(row[7]),
             size=_safe_task_size(row[8]),
             claimed_by=row[9],
         )
@@ -410,11 +458,11 @@ class MorpheusStore:
             PhaseRecord(
                 id=row[0],
                 task_id=row[1],
-                phase=Phase(row[2]),
-                status=PhaseStatus(row[3]),
-                evidence_json=row[4],
-                started_at=_parse_iso(row[5]),
-                completed_at=_parse_iso(row[6]) if row[6] else None,
+                phase=_safe_phase(row[2]),
+                status=_safe_phase_status(row[3]),
+                evidence_json=row[4] or "{}",
+                started_at=_safe_parse_iso(row[5]),
+                completed_at=_safe_parse_iso(row[6]) if row[6] else None,
             )
             for row in cur.fetchall()
         ]

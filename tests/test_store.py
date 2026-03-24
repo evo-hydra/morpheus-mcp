@@ -322,6 +322,98 @@ class TestDefensiveParsing:
             assert all(t.size == TaskSize.MEDIUM for t in tasks)
 
 
+class TestSafeParseIso:
+    """Tests for _safe_parse_iso defensive datetime parsing."""
+
+    def test_null_returns_now(self):
+        from morpheus_mcp.core.store import _safe_parse_iso
+        result = _safe_parse_iso(None)
+        assert result.tzinfo is not None  # has timezone
+
+    def test_invalid_returns_now(self):
+        from morpheus_mcp.core.store import _safe_parse_iso
+        result = _safe_parse_iso("not-a-date")
+        assert result.tzinfo is not None
+
+    def test_valid_parses(self):
+        from morpheus_mcp.core.store import _safe_parse_iso
+        result = _safe_parse_iso("2026-01-01T00:00:00+00:00")
+        assert result.year == 2026
+
+    def test_null_task_status_defaults(self):
+        from morpheus_mcp.core.store import _safe_task_status
+        assert _safe_task_status(None) == TaskStatus.PENDING
+        assert _safe_task_status("bogus") == TaskStatus.PENDING
+
+    def test_null_phase_defaults(self):
+        from morpheus_mcp.core.store import _safe_phase
+        from morpheus_mcp.models.enums import Phase
+        assert _safe_phase(None) == Phase.CHECK
+        assert _safe_phase("BOGUS") == Phase.CHECK
+
+    def test_null_phase_status_defaults(self):
+        from morpheus_mcp.core.store import _safe_phase_status
+        from morpheus_mcp.models.enums import PhaseStatus
+        assert _safe_phase_status(None) == PhaseStatus.STARTED
+        assert _safe_phase_status("bogus") == PhaseStatus.STARTED
+
+    def test_plan_with_null_created_at(self, tmp_path):
+        """Plans with NULL created_at don't crash."""
+        db_path = tmp_path / "null_dt.db"
+        import sqlite3 as _sql
+        conn = _sql.connect(str(db_path))
+        conn.executescript("""
+            CREATE TABLE morpheus_meta (key TEXT PRIMARY KEY, value TEXT);
+            INSERT INTO morpheus_meta(key, value) VALUES ('schema_version', '6');
+            CREATE TABLE plans (
+                id TEXT PRIMARY KEY, name TEXT NOT NULL, project TEXT NOT NULL DEFAULT '',
+                test_command TEXT NOT NULL DEFAULT '', grade_enabled INTEGER NOT NULL DEFAULT 1,
+                mode TEXT NOT NULL DEFAULT 'standard', status TEXT NOT NULL DEFAULT 'pending',
+                oil_change_due INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT, closed_at TEXT
+            );
+            INSERT INTO plans(id, name, project, created_at) VALUES ('p1', 'Test', '/tmp', NULL);
+            CREATE TABLE tasks (
+                id TEXT PRIMARY KEY, plan_id TEXT NOT NULL, seq INTEGER NOT NULL,
+                title TEXT NOT NULL, files_json TEXT DEFAULT '[]', do_text TEXT DEFAULT '',
+                done_when TEXT DEFAULT '', status TEXT, size TEXT, claimed_by TEXT
+            );
+            INSERT INTO tasks(id, plan_id, seq, title, status, size)
+                VALUES ('t1', 'p1', 1, 'Task', NULL, NULL);
+            CREATE TABLE phases (
+                id TEXT PRIMARY KEY, task_id TEXT NOT NULL, phase TEXT,
+                status TEXT, evidence_json TEXT, started_at TEXT, completed_at TEXT
+            );
+            INSERT INTO phases(id, task_id, phase, status, evidence_json, started_at, completed_at)
+                VALUES ('ph1', 't1', NULL, NULL, NULL, NULL, NULL);
+            CREATE TABLE progress_log (
+                id TEXT PRIMARY KEY, task_id TEXT NOT NULL, message TEXT NOT NULL, created_at TEXT NOT NULL
+            );
+            CREATE TABLE oil_changes (
+                id TEXT PRIMARY KEY, plan_id TEXT NOT NULL,
+                health_check_id TEXT NOT NULL DEFAULT '', commit_count INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL
+            );
+        """)
+        conn.commit()
+        conn.close()
+
+        with MorpheusStore(db_path) as store:
+            # All of these should succeed without crashing
+            plan = store.get_plan("p1")
+            assert plan is not None
+            assert plan.created_at is not None
+
+            task = store.get_task("t1")
+            assert task is not None
+            assert task.status == TaskStatus.PENDING
+            assert task.size == TaskSize.MEDIUM
+
+            phases = store.get_phases("t1")
+            assert len(phases) == 1
+            assert phases[0].started_at is not None
+
+
 class TestGetTasksByStatus:
     def test_filters_by_status(self, store, sample_plan_record, sample_task_records):
         """Returns only tasks matching the requested status."""

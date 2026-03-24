@@ -10,27 +10,44 @@ logger = logging.getLogger(__name__)
 
 
 def _self_test(db_path: str) -> bool:
-    """Quick round-trip to verify the store is healthy.
+    """Quick round-trip to verify the store and engine are healthy.
 
-    Creates a minimal plan, reads it back, deletes it.
+    Creates a minimal plan with one task, advances through CHECK,
+    then cleans up. Tests the full codepath that crashes on bad data.
     Returns True if healthy, False if degraded.
     """
+    from morpheus_mcp.core.engine import advance
     from morpheus_mcp.core.store import MorpheusStore
-    from morpheus_mcp.models.enums import PlanStatus
-    from morpheus_mcp.models.plan import PlanRecord
+    from morpheus_mcp.models.enums import Phase, PlanStatus
+    from morpheus_mcp.models.plan import PlanRecord, TaskRecord
 
-    test_id = "__selftest__"
+    test_plan_id = "__selftest_plan__"
+    test_task_id = "__selftest_task__"
     try:
         with MorpheusStore(db_path) as store:
             plan = PlanRecord(
-                id=test_id, name="self-test", project="__test__",
+                id=test_plan_id, name="self-test", project="__test__",
                 test_command="true", status=PlanStatus.PENDING,
             )
             store.save_plan(plan)
-            retrieved = store.get_plan(test_id)
-            store.conn.execute("DELETE FROM plans WHERE id = ?", (test_id,))
+            store.update_plan_status(test_plan_id, PlanStatus.ACTIVE)
+
+            task = TaskRecord(
+                id=test_task_id, plan_id=test_plan_id,
+                seq=1, title="self-test-task",
+            )
+            store.save_task(task)
+
+            # Exercise advance() — the codepath that crashes on bad data
+            result, _ = advance(store, test_task_id, Phase.CHECK, {})
+
+            # Clean up
+            store.conn.execute("DELETE FROM phases WHERE task_id = ?", (test_task_id,))
+            store.conn.execute("DELETE FROM tasks WHERE id = ?", (test_task_id,))
+            store.conn.execute("DELETE FROM plans WHERE id = ?", (test_plan_id,))
             store.conn.commit()
-            return retrieved is not None
+
+            return result.passed
     except Exception:
         logger.warning("Morpheus self-test failed — running in degraded mode", exc_info=True)
         return False
