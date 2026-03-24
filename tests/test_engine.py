@@ -199,6 +199,31 @@ class TestSizeAwareGates:
         r = validate_evidence(Phase.GRADE, {}, task_size=TaskSize.SMALL)
         assert r.passed is False
 
+    def test_micro_code_skips_all(self):
+        """MICRO tasks skip all CODE gate requirements."""
+        r = validate_evidence(Phase.CODE, {}, task_size=TaskSize.MICRO)
+        assert r.passed is True
+
+    def test_micro_grade_skips_all(self):
+        """MICRO tasks skip all GRADE gate requirements."""
+        r = validate_evidence(Phase.GRADE, {}, task_size=TaskSize.MICRO)
+        assert r.passed is True
+
+    def test_micro_commit_skips_all(self):
+        """MICRO tasks skip all COMMIT gate requirements."""
+        r = validate_evidence(Phase.COMMIT, {}, task_size=TaskSize.MICRO)
+        assert r.passed is True
+
+    def test_micro_advance_skips_all(self):
+        """MICRO tasks skip all ADVANCE gate requirements."""
+        r = validate_evidence(Phase.ADVANCE, {}, task_size=TaskSize.MICRO)
+        assert r.passed is True
+
+    def test_micro_test_skips_all(self):
+        """MICRO tasks skip all TEST gate requirements."""
+        r = validate_evidence(Phase.TEST, {}, task_size=TaskSize.MICRO)
+        assert r.passed is True
+
     def test_medium_unchanged(self):
         """MEDIUM tasks behave identically to default (CODE requires sibling_read)."""
         r = validate_evidence(Phase.CODE, {}, task_size=TaskSize.MEDIUM)

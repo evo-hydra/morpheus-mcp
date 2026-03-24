@@ -76,6 +76,7 @@ class TestParsePlanFile:
         assert tasks[1].size == TaskSize.MEDIUM  # default when omitted
         assert tasks[2].size == TaskSize.LARGE
         assert tasks[3].size == TaskSize.MEDIUM  # invalid falls back to medium
+        assert tasks[4].size == TaskSize.MICRO
 
     def test_greenfield_mode_parsing(self, sample_greenfield_plan_file):
         """Plans with mode: greenfield parse correctly."""

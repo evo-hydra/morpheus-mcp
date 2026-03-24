@@ -44,8 +44,15 @@ class PhaseStatus(str, Enum):
 
 
 class TaskSize(str, Enum):
-    """Size tier for a task — controls gate strictness."""
+    """Size tier for a task — controls gate strictness.
 
+    MICRO: do → test → commit. All gates accept empty evidence.
+    SMALL: Lightweight path — skips sibling_read, fdmc_review, seraph_id, knowledge_gate.
+    MEDIUM: Full protocol (default).
+    LARGE: Full protocol + mandatory Seraph grading even when grade=false.
+    """
+
+    MICRO = "micro"
     SMALL = "small"
     MEDIUM = "medium"
     LARGE = "large"

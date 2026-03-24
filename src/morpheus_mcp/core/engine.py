@@ -91,6 +91,10 @@ def validate_evidence(
     if not required:
         return GateResult(passed=True, message="No gate for this phase")
 
+    # MICRO tasks: all gates accept empty evidence — zero ceremony
+    if task_size == TaskSize.MICRO:
+        return GateResult(passed=True, message="MICRO task — gate skipped")
+
     # Backward compat: if old fdmc_preflight is provided, extract sibling_read
     if phase == Phase.CODE and "fdmc_preflight" in evidence and "sibling_read" not in evidence:
         fdmc = evidence["fdmc_preflight"]

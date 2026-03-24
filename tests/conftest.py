@@ -68,6 +68,13 @@ test_command: "echo ok"
 - **done-when**: Done
 - **status**: pending
 - **size**: huge
+
+## 5. Micro task
+- **files**: src/micro.py
+- **do**: Micro fix
+- **done-when**: Done
+- **status**: pending
+- **size**: micro
 """
 
 SAMPLE_GREENFIELD_PLAN_MD = """\
