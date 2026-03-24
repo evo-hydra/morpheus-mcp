@@ -157,3 +157,82 @@ class TestMorpheusVersion:
         data = json.loads(result)
         from morpheus_mcp.core.store import SCHEMA_VERSION
         assert data["schema_version"] == SCHEMA_VERSION
+
+
+def _extract_task_id(init_result: str, task_name: str) -> str:
+    """Extract task_id from morpheus_init output by task name."""
+    for line in init_result.splitlines():
+        if task_name in line:
+            return line.split("`")[1]
+    raise ValueError(f"Task '{task_name}' not found in init output")
+
+
+def _extract_plan_id(init_result: str) -> str:
+    """Extract plan_id from morpheus_init output."""
+    for line in init_result.splitlines():
+        if "**ID:**" in line:
+            return line.split("`")[1]
+    raise ValueError("Plan ID not found in init output")
+
+
+class TestMorpheusProgress:
+    def test_progress_valid_task(self, server, plan_file):
+        """morpheus_progress records a message for a valid task."""
+        init_result = server._tool_manager._tools["morpheus_init"].fn(str(plan_file))
+        task_id = _extract_task_id(init_result, "Task one")
+        result = server._tool_manager._tools["morpheus_progress"].fn(task_id, "halfway done")
+        assert "Progress logged" in result
+        assert "halfway done" in result
+
+    def test_progress_unknown_task(self, server, plan_file):
+        """morpheus_progress returns error for unknown task_id."""
+        server._tool_manager._tools["morpheus_init"].fn(str(plan_file))
+        result = server._tool_manager._tools["morpheus_progress"].fn("nonexistent", "msg")
+        assert "Error" in result or "not found" in result
+
+    def test_progress_empty_message(self, server, plan_file):
+        """morpheus_progress accepts an empty message."""
+        init_result = server._tool_manager._tools["morpheus_init"].fn(str(plan_file))
+        task_id = _extract_task_id(init_result, "Task one")
+        result = server._tool_manager._tools["morpheus_progress"].fn(task_id, "")
+        assert "Progress logged" in result
+
+
+class TestMorpheusAdvanceBatch:
+    def test_batch_valid(self, server, plan_file):
+        """morpheus_advance_batch processes a valid batch array."""
+        init_result = server._tool_manager._tools["morpheus_init"].fn(str(plan_file))
+        t1 = _extract_task_id(init_result, "Task one")
+        t2 = _extract_task_id(init_result, "Task two")
+        batch = json.dumps([
+            {"task_id": t1, "phase": "CHECK", "evidence": {}},
+            {"task_id": t2, "phase": "CHECK", "evidence": {}},
+        ])
+        result = server._tool_manager._tools["morpheus_advance_batch"].fn(batch)
+        assert "Batch Advance" in result
+        assert "PASSED" in result
+
+    def test_batch_empty_array(self, server, plan_file):
+        """morpheus_advance_batch rejects empty array."""
+        server._tool_manager._tools["morpheus_init"].fn(str(plan_file))
+        result = server._tool_manager._tools["morpheus_advance_batch"].fn("[]")
+        assert "Error" in result
+
+    def test_batch_invalid_json(self, server, plan_file):
+        """morpheus_advance_batch rejects invalid JSON."""
+        server._tool_manager._tools["morpheus_init"].fn(str(plan_file))
+        result = server._tool_manager._tools["morpheus_advance_batch"].fn("not json")
+        assert "Error" in result
+
+
+class TestMorpheusCloseEdgeCases:
+    def test_double_close(self, server, plan_file):
+        """Closing an already-closed plan returns a sensible result."""
+        init_result = server._tool_manager._tools["morpheus_init"].fn(str(plan_file))
+        plan_id = _extract_plan_id(init_result)
+        # First close
+        result1 = server._tool_manager._tools["morpheus_close"].fn(plan_id)
+        assert "Plan Complete" in result1
+        # Second close — should not crash (either idempotent success or clear error)
+        result2 = server._tool_manager._tools["morpheus_close"].fn(plan_id)
+        assert "Plan Complete" in result2 or "Error" in result2
