@@ -355,6 +355,118 @@ def test_invalid_size_lifecycle(tmp_path):
         assert closed.status == PlanStatus.COMPLETED
 
 
+def test_small_no_test_command_lifecycle(tmp_path):
+    """SMALL task + test_command:none = zero required evidence for all gates."""
+    config = MorpheusConfig.load(tmp_path / "data")
+
+    plan_file = tmp_path / "no-tests.md"
+    plan_file.write_text(
+        "---\n"
+        "name: No Tests Plan\n"
+        "project: /tmp/no-tests\n"
+        "test_command: none\n"
+        "---\n\n"
+        "## 1. Config-only change\n"
+        "- **files**: config.yaml\n"
+        "- **do**: Add setting\n"
+        "- **done-when**: Setting present\n"
+        "- **status**: pending\n"
+        "- **size**: small\n"
+    )
+
+    plan, tasks = parse_plan_file(plan_file)
+    assert plan.test_command == "none"
+    assert tasks[0].size == TaskSize.SMALL
+
+    with MorpheusStore(config.db_path) as store:
+        plan_id = init_plan(store, plan, tasks)
+        task = store.get_tasks(plan_id)[0]
+
+        # Walk all 6 phases with ZERO evidence — no rejections expected
+        phases_and_evidence = [
+            (Phase.CHECK, {}),
+            (Phase.CODE, {}),       # SMALL: sibling_read skipped
+            (Phase.TEST, {}),       # SMALL: build_verified skipped
+            (Phase.GRADE, {}),      # SMALL: fdmc_review skipped; test_command:none: tests_passed skipped
+            (Phase.COMMIT, {}),     # SMALL: seraph_id skipped
+            (Phase.ADVANCE, {}),    # SMALL: knowledge_gate skipped
+        ]
+
+        for phase, evidence in phases_and_evidence:
+            result, rec = advance(store, task.id, phase, evidence)
+            assert result.passed is True, f"{phase.value} rejected: {result.message}"
+
+        assert store.get_task(task.id).status == TaskStatus.DONE
+
+        # Verify zero rejections in the phase log
+        all_phases = store.get_phases(task.id)
+        rejected = [p for p in all_phases if p.status == PhaseStatus.REJECTED]
+        assert len(rejected) == 0, f"Got {len(rejected)} rejections, expected 0"
+
+        closed = close_plan(store, plan_id)
+        assert closed.status == PlanStatus.COMPLETED
+
+
+def test_medium_no_test_command_lifecycle(tmp_path):
+    """MEDIUM task + test_command:none skips test evidence but keeps other gates."""
+    config = MorpheusConfig.load(tmp_path / "data")
+
+    plan_file = tmp_path / "medium-no-tests.md"
+    plan_file.write_text(
+        "---\n"
+        "name: Medium No Tests\n"
+        "project: /tmp/medium-no-tests\n"
+        "test_command: none\n"
+        "---\n\n"
+        "## 1. Prompt engineering task\n"
+        "- **files**: prompts/system.md\n"
+        "- **do**: Refine system prompt\n"
+        "- **done-when**: Prompt updated\n"
+        "- **status**: pending\n"
+    )
+
+    plan, tasks = parse_plan_file(plan_file)
+    assert plan.test_command == "none"
+    assert tasks[0].size == TaskSize.MEDIUM  # default
+
+    with MorpheusStore(config.db_path) as store:
+        plan_id = init_plan(store, plan, tasks)
+        task = store.get_tasks(plan_id)[0]
+
+        advance(store, task.id, Phase.CHECK, {})
+
+        # CODE: MEDIUM still requires sibling_read
+        result, _ = advance(store, task.id, Phase.CODE, {})
+        assert result.passed is False
+        assert "sibling_read" in result.message
+        result, _ = advance(store, task.id, Phase.CODE, {"sibling_read": "prompts/old.md"})
+        assert result.passed is True
+
+        # TEST: test_command:none skips build_verified
+        result, _ = advance(store, task.id, Phase.TEST, {})
+        assert result.passed is True
+
+        # GRADE: test_command:none skips tests_passed, but MEDIUM still needs fdmc_review
+        result, _ = advance(store, task.id, Phase.GRADE, {})
+        assert result.passed is False
+        assert "fdmc_review" in result.message
+        result, _ = advance(store, task.id, Phase.GRADE, {"fdmc_review": "Consistent — matched"})
+        assert result.passed is True
+
+        # COMMIT: MEDIUM still requires seraph_id
+        result, _ = advance(store, task.id, Phase.COMMIT, {})
+        assert result.passed is False
+        result, _ = advance(store, task.id, Phase.COMMIT, {"seraph_id": "abc123"})
+        assert result.passed is True
+
+        # ADVANCE: 1-task plan → adaptive knowledge gate skips (threshold=5)
+        # knowledge_gate would be required for plans with 5+ tasks
+        result, _ = advance(store, task.id, Phase.ADVANCE, {})
+        assert result.passed is True
+
+        assert store.get_task(task.id).status == TaskStatus.DONE
+
+
 def test_oil_change_lifecycle(tmp_path):
     """Full oil change lifecycle: due → reject → clear → proceed."""
     config = MorpheusConfig.load(tmp_path / "data")
