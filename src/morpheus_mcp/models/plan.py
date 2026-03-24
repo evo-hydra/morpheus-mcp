@@ -37,6 +37,7 @@ class PlanRecord:
     grade_enabled: bool = True
     mode: str = "standard"
     status: PlanStatus = PlanStatus.PENDING
+    oil_change_due: bool = False
     created_at: datetime = field(default_factory=_now)
     closed_at: datetime | None = None
 

@@ -13,7 +13,7 @@ from morpheus_mcp.models.plan import PhaseRecord, PlanRecord, TaskRecord
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = "5"
+SCHEMA_VERSION = "6"
 
 _SCHEMA_SQL = """\
 CREATE TABLE IF NOT EXISTS morpheus_meta (
@@ -28,9 +28,10 @@ CREATE TABLE IF NOT EXISTS plans (
     test_command  TEXT NOT NULL DEFAULT '',
     grade_enabled INTEGER NOT NULL DEFAULT 1,
     mode          TEXT NOT NULL DEFAULT 'standard',
-    status        TEXT NOT NULL DEFAULT 'pending',
-    created_at    TEXT NOT NULL,
-    closed_at     TEXT
+    status           TEXT NOT NULL DEFAULT 'pending',
+    oil_change_due   INTEGER NOT NULL DEFAULT 0,
+    created_at       TEXT NOT NULL,
+    closed_at        TEXT
 );
 
 CREATE TABLE IF NOT EXISTS tasks (
@@ -193,6 +194,10 @@ class MorpheusStore:
                 " CREATE INDEX IF NOT EXISTS idx_oil_changes_plan ON oil_changes(plan_id);"
                 " UPDATE morpheus_meta SET value='5' WHERE key='schema_version';"
             ),
+            "5": (
+                "ALTER TABLE plans ADD COLUMN oil_change_due INTEGER NOT NULL DEFAULT 0;"
+                " UPDATE morpheus_meta SET value='6' WHERE key='schema_version';"
+            ),
         }
         current = from_version
         while current != SCHEMA_VERSION:
@@ -221,16 +226,18 @@ class MorpheusStore:
             grade_enabled=bool(row[4]),
             mode=row[5],
             status=_safe_plan_status(row[6]),
-            created_at=_parse_iso(row[7]),
-            closed_at=_parse_iso(row[8]) if row[8] else None,
+            oil_change_due=bool(row[7]),
+            created_at=_parse_iso(row[8]),
+            closed_at=_parse_iso(row[9]) if row[9] else None,
         )
 
     def save_plan(self, plan: PlanRecord) -> None:
         """Insert or replace a plan record."""
         self.conn.execute(
             "INSERT OR REPLACE INTO plans"
-            "(id, name, project, test_command, grade_enabled, mode, status, created_at, closed_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "(id, name, project, test_command, grade_enabled, mode, status, "
+            "oil_change_due, created_at, closed_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 plan.id,
                 plan.name,
@@ -239,6 +246,7 @@ class MorpheusStore:
                 1 if plan.grade_enabled else 0,
                 plan.mode,
                 plan.status.value,
+                1 if plan.oil_change_due else 0,
                 _iso(plan.created_at),
                 _iso(plan.closed_at) if plan.closed_at else None,
             ),
@@ -447,6 +455,14 @@ class MorpheusStore:
         return [(row[0], row[1], row[2]) for row in cur.fetchall()]
 
     # --- Oil Changes ---
+
+    def set_oil_change_due(self, plan_id: str, due: bool) -> None:
+        """Set or clear the oil_change_due flag on a plan."""
+        self.conn.execute(
+            "UPDATE plans SET oil_change_due = ? WHERE id = ?",
+            (1 if due else 0, plan_id),
+        )
+        self.conn.commit()
 
     def save_oil_change(
         self, plan_id: str, health_check_id: str, commit_count: int,

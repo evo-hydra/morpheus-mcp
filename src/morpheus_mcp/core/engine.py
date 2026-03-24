@@ -212,13 +212,18 @@ def init_plan(
     store: MorpheusStore,
     plan: PlanRecord,
     tasks: list[TaskRecord],
+    oil_change_interval: int = 40,
 ) -> str:
     """Save a plan and its tasks to the store.
+
+    If commits since last oil change exceed the interval, sets
+    oil_change_due on the plan so advance() can enforce it.
 
     Args:
         store: Open store instance.
         plan: The parsed plan record.
         tasks: The parsed task records.
+        oil_change_interval: Commit threshold for oil change advisory.
 
     Returns:
         The plan ID.
@@ -226,6 +231,12 @@ def init_plan(
     store.save_plan(plan)
     for task in tasks:
         store.save_task(task)
+
+    # Check if oil change is due and set the flag
+    advisory = check_oil_change_advisory(store, plan.project, oil_change_interval)
+    if advisory:
+        store.set_oil_change_due(plan.id, True)
+
     store.update_plan_status(plan.id, PlanStatus.ACTIVE)
     return plan.id
 
@@ -285,6 +296,20 @@ def advance(
 
     plan = store.get_plan(task.plan_id)
     grade_enabled = plan.grade_enabled if plan else True
+
+    # Oil change enforcement: reject CHECK on first task when oil_change_due
+    if phase == Phase.CHECK and plan and plan.oil_change_due:
+        tasks = store.get_tasks(plan.id)
+        first_task = tasks[0] if tasks else None
+        if first_task and first_task.id == full_id:
+            return GateResult(
+                passed=False,
+                message=(
+                    "Oil change required before starting plan. Run "
+                    "`sentinel_health_check`, review results, then call "
+                    "`morpheus_oil_change` to clear the gate."
+                ),
+            ), None
 
     # Enforce sequential phase ordering
     if phase != Phase.CHECK:

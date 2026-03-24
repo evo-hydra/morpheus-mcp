@@ -72,7 +72,7 @@ def create_server(config=None):
 
             plan, tasks = parse_plan_file(plan_file)
             with MorpheusStore(_config.db_path) as store:
-                init_plan(store, plan, tasks)
+                init_plan(store, plan, tasks, oil_change_interval=_config.gates.oil_change_interval)
                 summary = format_plan_summary(plan, tasks)
 
                 advisory = check_oil_change_advisory(
@@ -285,11 +285,15 @@ def create_server(config=None):
                 entry_id = store.save_oil_change(
                     plan_id, health_check_id, commits_since_last,
                 )
+                # Clear the oil_change_due flag so advance() proceeds
+                if plan.oil_change_due:
+                    store.set_oil_change_due(plan_id, False)
                 return (
                     f"Oil change recorded: `{entry_id[:12]}`\n"
                     f"- Plan: {plan.name}\n"
                     f"- Health check: {health_check_id}\n"
-                    f"- Commits: {commits_since_last}"
+                    f"- Commits: {commits_since_last}\n"
+                    f"- Oil change gate: cleared"
                 )
         except (sqlite3.Error, OSError) as exc:
             return f"Error: {exc}"

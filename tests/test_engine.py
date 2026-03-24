@@ -737,3 +737,43 @@ class TestOilChangeAdvisory:
         store.save_oil_change(plan.id, "hc-1", 40)
         msg = check_oil_change_advisory(store, "/tmp/project", oil_change_interval=40)
         assert msg is not None
+
+
+class TestOilChangeEnforcement:
+    def test_rejects_check_when_oil_change_due(self, store):
+        """First task's CHECK is rejected when oil_change_due is set."""
+        plan = PlanRecord(name="Test", project="/tmp", oil_change_due=True)
+        store.save_plan(plan)
+        task = TaskRecord(plan_id=plan.id, seq=1, title="Task 1")
+        store.save_task(task)
+
+        result, _ = advance(store, task.id, Phase.CHECK, {})
+        assert result.passed is False
+        assert "Oil change required" in result.message
+
+    def test_allows_check_after_oil_change_cleared(self, store):
+        """First task's CHECK proceeds after oil_change_due is cleared."""
+        plan = PlanRecord(name="Test", project="/tmp", oil_change_due=True)
+        store.save_plan(plan)
+        store.update_plan_status(plan.id, PlanStatus.ACTIVE)
+        task = TaskRecord(plan_id=plan.id, seq=1, title="Task 1")
+        store.save_task(task)
+
+        # Clear the flag
+        store.set_oil_change_due(plan.id, False)
+
+        result, phase_rec = advance(store, task.id, Phase.CHECK, {})
+        assert result.passed is True
+
+    def test_non_first_task_not_gated(self, store):
+        """Second task's CHECK is not gated even when oil_change_due is set."""
+        plan = PlanRecord(name="Test", project="/tmp", oil_change_due=True)
+        store.save_plan(plan)
+        store.update_plan_status(plan.id, PlanStatus.ACTIVE)
+        task1 = TaskRecord(plan_id=plan.id, seq=1, title="Task 1")
+        task2 = TaskRecord(plan_id=plan.id, seq=2, title="Task 2")
+        store.save_task(task1)
+        store.save_task(task2)
+
+        result, _ = advance(store, task2.id, Phase.CHECK, {})
+        assert result.passed is True
