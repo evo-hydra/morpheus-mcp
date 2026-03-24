@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 import uuid
 from datetime import datetime, timezone
@@ -9,6 +10,8 @@ from pathlib import Path
 
 from morpheus_mcp.models.enums import Phase, PhaseStatus, PlanStatus, TaskSize, TaskStatus
 from morpheus_mcp.models.plan import PhaseRecord, PlanRecord, TaskRecord
+
+logger = logging.getLogger(__name__)
 
 SCHEMA_VERSION = "4"
 
@@ -76,6 +79,30 @@ def _parse_iso(s: str) -> datetime:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
     return dt
+
+
+def _safe_task_size(value: str | None) -> TaskSize:
+    """Parse TaskSize from DB value, defaulting to MEDIUM on NULL or invalid."""
+    if value is None:
+        logger.warning("NULL task size in DB row — defaulting to MEDIUM")
+        return TaskSize.MEDIUM
+    try:
+        return TaskSize(value)
+    except ValueError:
+        logger.warning("Unknown task size %r in DB — defaulting to MEDIUM", value)
+        return TaskSize.MEDIUM
+
+
+def _safe_plan_status(value: str | None) -> PlanStatus:
+    """Parse PlanStatus from DB value, defaulting to ACTIVE on NULL or invalid."""
+    if value is None:
+        logger.warning("NULL plan status in DB row — defaulting to ACTIVE")
+        return PlanStatus.ACTIVE
+    try:
+        return PlanStatus(value)
+    except ValueError:
+        logger.warning("Unknown plan status %r in DB — defaulting to ACTIVE", value)
+        return PlanStatus.ACTIVE
 
 
 class MorpheusStore:
@@ -175,7 +202,7 @@ class MorpheusStore:
             test_command=row[3],
             grade_enabled=bool(row[4]),
             mode=row[5],
-            status=PlanStatus(row[6]),
+            status=_safe_plan_status(row[6]),
             created_at=_parse_iso(row[7]),
             closed_at=_parse_iso(row[8]) if row[8] else None,
         )
@@ -260,7 +287,7 @@ class MorpheusStore:
             do_text=row[5],
             done_when=row[6],
             status=TaskStatus(row[7]),
-            size=TaskSize(row[8]),
+            size=_safe_task_size(row[8]),
             claimed_by=row[9],
         )
 
@@ -320,7 +347,13 @@ class MorpheusStore:
             "SELECT status, COUNT(*) FROM tasks WHERE plan_id = ? GROUP BY status",
             (plan_id,),
         )
-        return {TaskStatus(row[0]): row[1] for row in cur.fetchall()}
+        result: dict[TaskStatus, int] = {}
+        for row in cur.fetchall():
+            try:
+                result[TaskStatus(row[0])] = row[1]
+            except ValueError:
+                logger.warning("Unknown task status %r in count query — skipping", row[0])
+        return result
 
     # --- Phase CRUD ---
 

@@ -203,6 +203,98 @@ class TestTaskCRUD:
             assert retrieved.size == size
 
 
+class TestDefensiveParsing:
+    def test_null_size_defaults_to_medium(self, tmp_path):
+        """Tasks with NULL size (pre-migration DB) default to MEDIUM."""
+        # Simulate a pre-migration DB without NOT NULL constraint on size
+        db_path = tmp_path / "legacy.db"
+        import sqlite3 as _sql
+
+        conn = _sql.connect(str(db_path))
+        conn.executescript("""
+            CREATE TABLE morpheus_meta (key TEXT PRIMARY KEY, value TEXT);
+            INSERT INTO morpheus_meta(key, value) VALUES ('schema_version', '4');
+            CREATE TABLE plans (
+                id TEXT PRIMARY KEY, name TEXT NOT NULL, project TEXT NOT NULL DEFAULT '',
+                test_command TEXT NOT NULL DEFAULT '', grade_enabled INTEGER NOT NULL DEFAULT 1,
+                mode TEXT NOT NULL DEFAULT 'standard', status TEXT NOT NULL DEFAULT 'pending',
+                created_at TEXT NOT NULL, closed_at TEXT
+            );
+            INSERT INTO plans(id, name, project, created_at) VALUES ('p1', 'Test', '/tmp', '2026-01-01T00:00:00+00:00');
+            CREATE TABLE tasks (
+                id TEXT PRIMARY KEY, plan_id TEXT NOT NULL, seq INTEGER NOT NULL,
+                title TEXT NOT NULL, files_json TEXT DEFAULT '[]', do_text TEXT DEFAULT '',
+                done_when TEXT DEFAULT '', status TEXT DEFAULT 'pending',
+                size TEXT, claimed_by TEXT
+            );
+            INSERT INTO tasks(id, plan_id, seq, title, status, size)
+                VALUES ('t1', 'p1', 1, 'NullSize', 'pending', NULL);
+        """)
+        conn.commit()
+        conn.close()
+        # Open via MorpheusStore — it should handle the NULL size
+        with MorpheusStore(db_path) as store:
+            task = store.get_task("t1")
+            assert task is not None
+            assert task.size == TaskSize.MEDIUM
+
+    def test_invalid_size_defaults_to_medium(self, store, sample_plan_record):
+        """Tasks with an unrecognized size string default to MEDIUM."""
+        store.save_plan(sample_plan_record)
+        task = TaskRecord(plan_id=sample_plan_record.id, seq=1, title="BadSize")
+        store.save_task(task)
+        store.conn.execute("UPDATE tasks SET size = 'huge' WHERE id = ?", (task.id,))
+        store.conn.commit()
+        retrieved = store.get_task(task.id)
+        assert retrieved is not None
+        assert retrieved.size == TaskSize.MEDIUM
+
+    def test_invalid_plan_status_defaults_to_active(self, store):
+        """Plans with unrecognized status string default to ACTIVE."""
+        plan = PlanRecord(name="BadStatus", project="/tmp")
+        store.save_plan(plan)
+        store.conn.execute(
+            "UPDATE plans SET status = 'exploded' WHERE id = ?", (plan.id,)
+        )
+        store.conn.commit()
+        retrieved = store.get_plan(plan.id)
+        assert retrieved is not None
+        assert retrieved.status == PlanStatus.ACTIVE
+
+    def test_null_size_in_get_tasks_list(self, tmp_path):
+        """get_tasks() handles NULL size across multiple rows."""
+        db_path = tmp_path / "legacy_list.db"
+        import sqlite3 as _sql
+
+        conn = _sql.connect(str(db_path))
+        conn.executescript("""
+            CREATE TABLE morpheus_meta (key TEXT PRIMARY KEY, value TEXT);
+            INSERT INTO morpheus_meta(key, value) VALUES ('schema_version', '4');
+            CREATE TABLE plans (
+                id TEXT PRIMARY KEY, name TEXT NOT NULL, project TEXT NOT NULL DEFAULT '',
+                test_command TEXT NOT NULL DEFAULT '', grade_enabled INTEGER NOT NULL DEFAULT 1,
+                mode TEXT NOT NULL DEFAULT 'standard', status TEXT NOT NULL DEFAULT 'pending',
+                created_at TEXT NOT NULL, closed_at TEXT
+            );
+            INSERT INTO plans(id, name, project, created_at) VALUES ('p1', 'Test', '/tmp', '2026-01-01T00:00:00+00:00');
+            CREATE TABLE tasks (
+                id TEXT PRIMARY KEY, plan_id TEXT NOT NULL, seq INTEGER NOT NULL,
+                title TEXT NOT NULL, files_json TEXT DEFAULT '[]', do_text TEXT DEFAULT '',
+                done_when TEXT DEFAULT '', status TEXT DEFAULT 'pending',
+                size TEXT, claimed_by TEXT
+            );
+            INSERT INTO tasks(id, plan_id, seq, title, size) VALUES ('t1', 'p1', 1, 'T0', NULL);
+            INSERT INTO tasks(id, plan_id, seq, title, size) VALUES ('t2', 'p1', 2, 'T1', NULL);
+            INSERT INTO tasks(id, plan_id, seq, title, size) VALUES ('t3', 'p1', 3, 'T2', NULL);
+        """)
+        conn.commit()
+        conn.close()
+        with MorpheusStore(db_path) as store:
+            tasks = store.get_tasks("p1")
+            assert len(tasks) == 3
+            assert all(t.size == TaskSize.MEDIUM for t in tasks)
+
+
 class TestGetTasksByStatus:
     def test_filters_by_status(self, store, sample_plan_record, sample_task_records):
         """Returns only tasks matching the requested status."""
