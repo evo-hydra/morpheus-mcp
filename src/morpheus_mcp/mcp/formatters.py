@@ -15,12 +15,21 @@ _STATUS_ICONS = {
 }
 
 
+def _count_tasks_by_status(tasks: list[TaskRecord]) -> dict[TaskStatus, int]:
+    """Count tasks grouped by status."""
+    counts: dict[TaskStatus, int] = {}
+    for t in tasks:
+        counts[t.status] = counts.get(t.status, 0) + 1
+    return counts
+
+
 def format_plan_summary(plan: PlanRecord, tasks: list[TaskRecord]) -> str:
     """Format a plan summary with task status list."""
     total = len(tasks)
-    done = sum(1 for t in tasks if t.status == TaskStatus.DONE)
-    failed = sum(1 for t in tasks if t.status == TaskStatus.FAILED)
-    skipped = sum(1 for t in tasks if t.status == TaskStatus.SKIPPED)
+    counts = _count_tasks_by_status(tasks)
+    done = counts.get(TaskStatus.DONE, 0)
+    failed = counts.get(TaskStatus.FAILED, 0)
+    skipped = counts.get(TaskStatus.SKIPPED, 0)
     pct = int(done / total * 100) if total else 0
 
     mode_tag = f" [{plan.mode}]" if plan.mode != "standard" else ""
@@ -128,9 +137,10 @@ def format_close_summary(
 ) -> str:
     """Format plan closure summary."""
     total = len(tasks)
-    done = sum(1 for t in tasks if t.status == TaskStatus.DONE)
-    failed = sum(1 for t in tasks if t.status == TaskStatus.FAILED)
-    skipped = sum(1 for t in tasks if t.status == TaskStatus.SKIPPED)
+    counts = _count_tasks_by_status(tasks)
+    done = counts.get(TaskStatus.DONE, 0)
+    failed = counts.get(TaskStatus.FAILED, 0)
+    skipped = counts.get(TaskStatus.SKIPPED, 0)
 
     # Size distribution
     sizes = {s: sum(1 for t in tasks if t.size == s) for s in TaskSize}
