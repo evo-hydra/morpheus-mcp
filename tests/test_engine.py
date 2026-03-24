@@ -753,6 +753,23 @@ class TestBatchAdvance:
         assert batch.results[0][2].passed is False
         assert batch.results[1][2].passed is True
 
+    def test_batch_small_check_and_code(self, store, sample_plan_record):
+        """Batch advance SMALL task through CHECK+CODE with empty evidence — no rejections."""
+        store.save_plan(sample_plan_record)
+        t1 = TaskRecord(
+            plan_id=sample_plan_record.id, seq=1, title="Small1",
+            size=TaskSize.SMALL,
+        )
+        store.save_task(t1)
+
+        batch = advance_batch(store, [
+            {"task_id": t1.id, "phase": "CHECK", "evidence": {}},
+            {"task_id": t1.id, "phase": "CODE", "evidence": {}},
+        ])
+        assert len(batch.results) == 2
+        assert batch.results[0][2].passed is True, f"CHECK failed: {batch.results[0][2].message}"
+        assert batch.results[1][2].passed is True, f"CODE failed: {batch.results[1][2].message}"
+
     def test_batch_empty_list(self, store):
         """Empty batch returns empty results."""
         batch = advance_batch(store, [])
