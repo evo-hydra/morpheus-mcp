@@ -190,15 +190,21 @@ class TestSizeAwareGates:
         r = validate_evidence(Phase.ADVANCE, {}, task_size=TaskSize.SMALL)
         assert r.passed is True
 
-    def test_small_test_still_required(self):
-        """SMALL tasks still require build_verified."""
+    def test_small_test_skips_build_verified(self):
+        """SMALL tasks skip build_verified requirement."""
         r = validate_evidence(Phase.TEST, {}, task_size=TaskSize.SMALL)
-        assert r.passed is False
+        assert r.passed is True
 
-    def test_small_grade_still_required(self):
-        """SMALL tasks still require tests_passed."""
+    def test_small_grade_still_requires_tests_passed(self):
+        """SMALL tasks still require tests_passed (only fdmc_review is skipped)."""
         r = validate_evidence(Phase.GRADE, {}, task_size=TaskSize.SMALL)
         assert r.passed is False
+        assert "tests_passed" in r.message
+
+    def test_small_grade_accepts_tests_passed_only(self):
+        """SMALL tasks pass GRADE with just tests_passed."""
+        r = validate_evidence(Phase.GRADE, {"tests_passed": "3 passed"}, task_size=TaskSize.SMALL)
+        assert r.passed is True
 
     def test_micro_code_skips_all(self):
         """MICRO tasks skip all CODE gate requirements."""
@@ -272,15 +278,74 @@ class TestSizeAwareGates:
 
         # Walk through all phases with minimal evidence
         advance(store, task.id, Phase.CHECK, {})
-        advance(store, task.id, Phase.CODE, {})  # no fdmc needed
-        advance(store, task.id, Phase.TEST, {"build_verified": "ok"})
-        advance(store, task.id, Phase.GRADE, {"tests_passed": "ok"})
+        advance(store, task.id, Phase.CODE, {})  # no sibling_read needed
+        advance(store, task.id, Phase.TEST, {})  # no build_verified needed
+        advance(store, task.id, Phase.GRADE, {"tests_passed": "ok"})  # only tests_passed
         advance(store, task.id, Phase.COMMIT, {})  # no seraph needed
         result, _ = advance(store, task.id, Phase.ADVANCE, {})  # no knowledge_gate needed
         assert result.passed is True
 
         retrieved = store.get_task(task.id)
         assert retrieved.status == TaskStatus.DONE
+
+
+class TestNoTestCommand:
+    """Tests for test_command: none — skip test-related gates honestly."""
+
+    def test_none_skips_build_verified(self):
+        """test_command=none skips build_verified in TEST phase."""
+        r = validate_evidence(Phase.TEST, {}, test_command="none")
+        assert r.passed is True
+
+    def test_none_skips_tests_passed(self):
+        """test_command=none skips tests_passed in GRADE phase."""
+        r = validate_evidence(Phase.GRADE, {"fdmc_review": "Consistent"}, test_command="none")
+        assert r.passed is True
+
+    def test_none_case_insensitive(self):
+        """test_command=None (capitalized) also works."""
+        r = validate_evidence(Phase.TEST, {}, test_command="None")
+        assert r.passed is True
+
+    def test_none_grade_still_requires_fdmc_for_medium(self):
+        """test_command=none skips tests_passed but MEDIUM still needs fdmc_review."""
+        r = validate_evidence(Phase.GRADE, {}, test_command="none")
+        assert r.passed is False
+        assert "fdmc_review" in r.message
+
+    def test_none_grade_small_skips_everything(self):
+        """SMALL + test_command=none: GRADE has zero required evidence."""
+        r = validate_evidence(Phase.GRADE, {}, task_size=TaskSize.SMALL, test_command="none")
+        assert r.passed is True
+
+    def test_empty_string_does_not_skip(self):
+        """Empty test_command does NOT skip gates (must be explicit 'none')."""
+        r = validate_evidence(Phase.TEST, {}, test_command="")
+        assert r.passed is False
+
+    def test_real_command_does_not_skip(self):
+        """Real test commands still enforce gates."""
+        r = validate_evidence(Phase.TEST, {}, test_command="pytest")
+        assert r.passed is False
+
+    def test_none_full_lifecycle(self, store):
+        """Plan with test_command=none completes lifecycle without test evidence."""
+        plan = PlanRecord(name="NoTests", project="/tmp", test_command="none")
+        store.save_plan(plan)
+        task = TaskRecord(plan_id=plan.id, seq=1, title="T1")
+        store.save_task(task)
+        store.update_plan_status(plan.id, PlanStatus.ACTIVE)
+
+        advance(store, task.id, Phase.CHECK, {})
+        advance(store, task.id, Phase.CODE, {"sibling_read": "config.yaml"})
+        r_test, _ = advance(store, task.id, Phase.TEST, {})  # no build_verified
+        assert r_test.passed is True
+        r_grade, _ = advance(store, task.id, Phase.GRADE, {"fdmc_review": "Consistent"})  # no tests_passed
+        assert r_grade.passed is True
+        advance(store, task.id, Phase.COMMIT, {"seraph_id": "abc"})
+        advance(store, task.id, Phase.ADVANCE, {"knowledge_gate": "true"})
+
+        assert store.get_task(task.id).status == TaskStatus.DONE
 
 
 class TestGreenfieldMode:

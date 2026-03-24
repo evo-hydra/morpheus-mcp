@@ -71,6 +71,7 @@ def validate_evidence(
     plan_mode: str = "standard",
     task_count: int = 0,
     knowledge_gate_task_threshold: int = 5,
+    test_command: str = "",
 ) -> GateResult:
     """Validate that evidence satisfies the gate requirements for a phase.
 
@@ -82,6 +83,7 @@ def validate_evidence(
         plan_mode: Plan mode — 'greenfield' relaxes sibling_read.
         task_count: Total tasks in the plan — small plans relax knowledge gate.
         knowledge_gate_task_threshold: Plans below this count skip knowledge gate.
+        test_command: Plan test command — 'none' skips test-related gates.
 
     Returns:
         GateResult with passed=True if gate is satisfied, or
@@ -115,15 +117,24 @@ def validate_evidence(
 
     missing: list[str] = []
     for key, description in required.items():
-        # SMALL tasks: skip sibling_read, fdmc_review, seraph_id, knowledge_gate
+        # SMALL tasks: skip sibling_read, build_verified, fdmc_review, seraph_id, knowledge_gate
         if task_size == TaskSize.SMALL:
             if phase == Phase.CODE and key == "sibling_read":
+                continue
+            if phase == Phase.TEST and key == "build_verified":
                 continue
             if phase == Phase.GRADE and key == "fdmc_review":
                 continue
             if phase == Phase.COMMIT and key == "seraph_id":
                 continue
             if phase == Phase.ADVANCE and key == "knowledge_gate":
+                continue
+
+        # test_command: none — skip test-related evidence when there's nothing to test
+        if test_command.lower() == "none":
+            if phase == Phase.TEST and key == "build_verified":
+                continue
+            if phase == Phase.GRADE and key == "tests_passed":
                 continue
 
         # Small plans: skip knowledge_gate when plan has fewer tasks than threshold
@@ -339,11 +350,13 @@ def advance(
 
     # Validate the gate evidence
     plan_mode = plan.mode if plan else "standard"
+    plan_test_command = plan.test_command if plan else ""
     task_count = len(store.get_tasks(task.plan_id)) if plan else 0
     result = validate_evidence(
         phase, evidence, grade_enabled=grade_enabled, task_size=task.size,
         plan_mode=plan_mode, task_count=task_count,
         knowledge_gate_task_threshold=knowledge_gate_task_threshold,
+        test_command=plan_test_command,
     )
     if not result.passed:
         # Record the rejection
