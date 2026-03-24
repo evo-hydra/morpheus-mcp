@@ -613,33 +613,54 @@ class TestBatchAdvance:
         assert len(batch.results) == 2
         assert all(r[2].passed for r in batch.results)
 
-    def test_batch_stops_on_failure(self, store, sample_plan_record):
-        """Batch stops at first failure."""
+    def test_batch_continues_past_failure(self, store, sample_plan_record):
+        """Batch continues processing after a failed advance."""
         store.save_plan(sample_plan_record)
         t1 = TaskRecord(plan_id=sample_plan_record.id, seq=1, title="T1")
+        t2 = TaskRecord(plan_id=sample_plan_record.id, seq=2, title="T2")
         store.save_task(t1)
+        store.save_task(t2)
 
-        # CHECK succeeds, CODE fails (no evidence, skipped CHECK)
+        # t1 CODE fails (no CHECK done), but t2 CHECK should still succeed
         batch = advance_batch(store, [
-            {"task_id": t1.id, "phase": "CHECK", "evidence": {}},
-            {"task_id": t1.id, "phase": "CODE", "evidence": {}},  # will fail
+            {"task_id": t1.id, "phase": "CODE", "evidence": {}},  # fails
+            {"task_id": t2.id, "phase": "CHECK", "evidence": {}},  # succeeds
         ])
         assert len(batch.results) == 2
-        assert batch.results[0][2].passed is True
-        assert batch.results[1][2].passed is False
+        assert batch.results[0][2].passed is False
+        assert batch.results[1][2].passed is True
 
-    def test_batch_invalid_phase(self, store, sample_plan_record):
-        """Batch rejects invalid phase name."""
+    def test_batch_invalid_phase_continues(self, store, sample_plan_record):
+        """Batch continues past invalid phase name."""
         store.save_plan(sample_plan_record)
         t1 = TaskRecord(plan_id=sample_plan_record.id, seq=1, title="T1")
+        t2 = TaskRecord(plan_id=sample_plan_record.id, seq=2, title="T2")
         store.save_task(t1)
+        store.save_task(t2)
 
         batch = advance_batch(store, [
             {"task_id": t1.id, "phase": "INVALID", "evidence": {}},
+            {"task_id": t2.id, "phase": "CHECK", "evidence": {}},
         ])
-        assert len(batch.results) == 1
+        assert len(batch.results) == 2
         assert batch.results[0][2].passed is False
         assert "Invalid phase" in batch.results[0][2].message
+        assert batch.results[1][2].passed is True
+
+    def test_batch_exception_captured(self, store, sample_plan_record):
+        """Exceptions during advance are captured, not propagated."""
+        store.save_plan(sample_plan_record)
+        t1 = TaskRecord(plan_id=sample_plan_record.id, seq=1, title="T1")
+        store.save_task(t1)
+
+        # Nonexistent task produces error but doesn't crash the batch
+        batch = advance_batch(store, [
+            {"task_id": "nonexistent_task_id_xxxxx", "phase": "CHECK", "evidence": {}},
+            {"task_id": t1.id, "phase": "CHECK", "evidence": {}},
+        ])
+        assert len(batch.results) == 2
+        assert batch.results[0][2].passed is False
+        assert batch.results[1][2].passed is True
 
     def test_batch_empty_list(self, store):
         """Empty batch returns empty results."""

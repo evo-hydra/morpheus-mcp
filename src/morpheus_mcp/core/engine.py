@@ -333,17 +333,18 @@ def advance_batch(
     store: MorpheusStore,
     advances: list[dict[str, Any]],
 ) -> BatchResult:
-    """Process multiple phase advances atomically.
+    """Process multiple phase advances, collecting results per task.
 
-    If any advance fails, all preceding advances in this batch are still
-    committed (no rollback) but the batch stops at the first failure.
+    Continues processing remaining advances even if one fails. Each advance
+    is independent — a failure (gate rejection, invalid phase, corrupt data)
+    is recorded for that task but does not block subsequent advances.
 
     Args:
         store: Open store instance.
         advances: List of dicts with keys: task_id, phase, evidence.
 
     Returns:
-        BatchResult with per-advance results.
+        BatchResult with per-advance results including any errors.
     """
     results: list[tuple[str, str, GateResult]] = []
     for item in advances:
@@ -356,12 +357,17 @@ def advance_batch(
         except ValueError:
             gate = GateResult(passed=False, message=f"Invalid phase '{phase_str}'")
             results.append((task_id, phase_str, gate))
-            break
+            continue
 
-        result, _ = advance(store, task_id, phase, evidence)
-        results.append((task_id, phase.value, result))
-        if not result.passed:
-            break
+        try:
+            result, _ = advance(store, task_id, phase, evidence)
+            results.append((task_id, phase.value, result))
+        except Exception as exc:
+            gate = GateResult(
+                passed=False,
+                message=f"Error advancing task '{task_id}' through {phase.value}: {exc}",
+            )
+            results.append((task_id, phase.value, gate))
 
     return BatchResult(results=results)
 
