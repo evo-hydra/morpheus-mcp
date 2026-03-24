@@ -13,7 +13,7 @@ from morpheus_mcp.models.plan import PhaseRecord, PlanRecord, TaskRecord
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = "4"
+SCHEMA_VERSION = "5"
 
 _SCHEMA_SQL = """\
 CREATE TABLE IF NOT EXISTS morpheus_meta (
@@ -65,6 +65,15 @@ CREATE TABLE IF NOT EXISTS progress_log (
     created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_progress_task ON progress_log(task_id);
+
+CREATE TABLE IF NOT EXISTS oil_changes (
+    id              TEXT PRIMARY KEY,
+    plan_id         TEXT NOT NULL,
+    health_check_id TEXT NOT NULL DEFAULT '',
+    commit_count    INTEGER NOT NULL DEFAULT 0,
+    created_at      TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_oil_changes_plan ON oil_changes(plan_id);
 """
 
 
@@ -174,6 +183,15 @@ class MorpheusStore:
                 "message TEXT NOT NULL, created_at TEXT NOT NULL);"
                 " CREATE INDEX IF NOT EXISTS idx_progress_task ON progress_log(task_id);"
                 " UPDATE morpheus_meta SET value='4' WHERE key='schema_version';"
+            ),
+            "4": (
+                "CREATE TABLE IF NOT EXISTS oil_changes ("
+                "id TEXT PRIMARY KEY, plan_id TEXT NOT NULL, "
+                "health_check_id TEXT NOT NULL DEFAULT '', "
+                "commit_count INTEGER NOT NULL DEFAULT 0, "
+                "created_at TEXT NOT NULL);"
+                " CREATE INDEX IF NOT EXISTS idx_oil_changes_plan ON oil_changes(plan_id);"
+                " UPDATE morpheus_meta SET value='5' WHERE key='schema_version';"
             ),
         }
         current = from_version
@@ -427,3 +445,45 @@ class MorpheusStore:
             (task_id, limit),
         )
         return [(row[0], row[1], row[2]) for row in cur.fetchall()]
+
+    # --- Oil Changes ---
+
+    def save_oil_change(
+        self, plan_id: str, health_check_id: str, commit_count: int,
+    ) -> str:
+        """Record an oil change (macro-lens health check). Returns the entry ID."""
+        entry_id = uuid.uuid4().hex
+        self.conn.execute(
+            "INSERT INTO oil_changes(id, plan_id, health_check_id, commit_count, created_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (entry_id, plan_id, health_check_id, commit_count,
+             _iso(datetime.now(timezone.utc))),
+        )
+        self.conn.commit()
+        return entry_id
+
+    def get_last_oil_change(self, project: str) -> dict | None:
+        """Get the most recent oil change for a project.
+
+        Looks up oil changes via the plan's project field.
+        Returns dict with id, plan_id, health_check_id, commit_count, created_at
+        or None if no oil changes exist.
+        """
+        cur = self.conn.execute(
+            "SELECT oc.id, oc.plan_id, oc.health_check_id, oc.commit_count, oc.created_at "
+            "FROM oil_changes oc "
+            "JOIN plans p ON p.id = oc.plan_id "
+            "WHERE p.project = ? "
+            "ORDER BY oc.created_at DESC LIMIT 1",
+            (project,),
+        )
+        row = cur.fetchone()
+        if row is None:
+            return None
+        return {
+            "id": row[0],
+            "plan_id": row[1],
+            "health_check_id": row[2],
+            "commit_count": row[3],
+            "created_at": row[4],
+        }

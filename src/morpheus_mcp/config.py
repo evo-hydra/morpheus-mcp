@@ -53,6 +53,7 @@ class GateConfig:
     """Gate enforcement configuration."""
 
     knowledge_gate_task_threshold: int = 5
+    oil_change_interval: int = 40
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,6 +117,15 @@ class MorpheusConfig:
                     gates_data.get(
                         "knowledge_gate_task_threshold",
                         _gate_defaults.knowledge_gate_task_threshold,
+                    ),
+                )
+            ),
+            oil_change_interval=int(
+                os.environ.get(
+                    "MORPHEUS_OIL_CHANGE_INTERVAL",
+                    gates_data.get(
+                        "oil_change_interval",
+                        _gate_defaults.oil_change_interval,
                     ),
                 )
             ),

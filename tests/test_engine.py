@@ -9,6 +9,7 @@ import pytest
 from morpheus_mcp.core.engine import (
     advance,
     advance_batch,
+    check_oil_change_advisory,
     close_plan,
     init_plan,
     validate_evidence,
@@ -705,3 +706,34 @@ class TestClosePlan:
     def test_close_nonexistent(self, store):
         """Closing nonexistent plan returns None."""
         assert close_plan(store, "nonexistent") is None
+
+
+class TestOilChangeAdvisory:
+    def test_no_history_returns_none(self, store):
+        """No oil change history returns None (can't advise)."""
+        assert check_oil_change_advisory(store, "/tmp/project") is None
+
+    def test_within_interval_returns_none(self, store):
+        """Commit count below interval returns None."""
+        plan = PlanRecord(name="Test", project="/tmp/project")
+        store.save_plan(plan)
+        store.save_oil_change(plan.id, "hc-1", 10)
+        assert check_oil_change_advisory(store, "/tmp/project", oil_change_interval=40) is None
+
+    def test_exceeds_interval_returns_advisory(self, store):
+        """Commit count above interval returns advisory message."""
+        plan = PlanRecord(name="Test", project="/tmp/project")
+        store.save_plan(plan)
+        store.save_oil_change(plan.id, "hc-1", 50)
+        msg = check_oil_change_advisory(store, "/tmp/project", oil_change_interval=40)
+        assert msg is not None
+        assert "50 commits" in msg
+        assert "threshold: 40" in msg
+
+    def test_exact_threshold_returns_advisory(self, store):
+        """Commit count exactly at interval triggers advisory."""
+        plan = PlanRecord(name="Test", project="/tmp/project")
+        store.save_plan(plan)
+        store.save_oil_change(plan.id, "hc-1", 40)
+        msg = check_oil_change_advisory(store, "/tmp/project", oil_change_interval=40)
+        assert msg is not None

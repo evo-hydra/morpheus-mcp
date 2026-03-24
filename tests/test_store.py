@@ -46,7 +46,7 @@ class TestSchemaVersion:
         cur = store.conn.execute(
             "SELECT value FROM morpheus_meta WHERE key='schema_version'"
         )
-        assert cur.fetchone()[0] == "4"
+        assert cur.fetchone()[0] == "5"
 
     def test_idempotent_open(self, tmp_path):
         """Opening twice doesn't change schema version."""
@@ -57,7 +57,7 @@ class TestSchemaVersion:
             cur = s.conn.execute(
                 "SELECT value FROM morpheus_meta WHERE key='schema_version'"
             )
-            assert cur.fetchone()[0] == "4"
+            assert cur.fetchone()[0] == "5"
 
 
 class TestPlanCRUD:
@@ -201,6 +201,33 @@ class TestTaskCRUD:
             store.save_task(task)
             retrieved = store.get_task(task.id)
             assert retrieved.size == size
+
+
+class TestOilChanges:
+    def test_save_and_get_oil_change(self, store, sample_plan_record):
+        """Oil change records persist and can be retrieved by project."""
+        store.save_plan(sample_plan_record)
+        entry_id = store.save_oil_change(sample_plan_record.id, "hc-123", 42)
+        assert entry_id
+
+        last = store.get_last_oil_change(sample_plan_record.project)
+        assert last is not None
+        assert last["plan_id"] == sample_plan_record.id
+        assert last["health_check_id"] == "hc-123"
+        assert last["commit_count"] == 42
+
+    def test_no_oil_change_returns_none(self, store):
+        """Returns None when no oil changes exist for a project."""
+        assert store.get_last_oil_change("/nonexistent/project") is None
+
+    def test_oil_change_table_created(self, store):
+        """Oil changes table exists in schema."""
+        tables = {
+            row[0] for row in store.conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+        assert "oil_changes" in tables
 
 
 class TestDefensiveParsing:

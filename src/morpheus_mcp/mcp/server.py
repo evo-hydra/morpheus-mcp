@@ -68,10 +68,19 @@ def create_server(config=None):
         from morpheus_mcp.mcp.formatters import format_plan_summary
 
         try:
+            from morpheus_mcp.core.engine import check_oil_change_advisory
+
             plan, tasks = parse_plan_file(plan_file)
             with MorpheusStore(_config.db_path) as store:
                 init_plan(store, plan, tasks)
                 summary = format_plan_summary(plan, tasks)
+
+                advisory = check_oil_change_advisory(
+                    store, plan.project, _config.gates.oil_change_interval,
+                )
+                if advisory:
+                    summary = f"**OIL CHANGE:** {advisory}\n\n{summary}"
+
                 if _degraded:
                     summary = (
                         "**WARNING:** Morpheus is running in degraded mode "
@@ -251,6 +260,37 @@ def create_server(config=None):
 
                 tasks = store.get_tasks(plan.id)
                 return format_close_summary(plan, tasks)
+        except (sqlite3.Error, OSError) as exc:
+            return f"Error: {exc}"
+
+    @mcp.tool()
+    def morpheus_oil_change(plan_id: str, health_check_id: str, commits_since_last: int = 0) -> str:
+        """Record an oil change (macro-lens health check) for a plan.
+
+        Call this after running sentinel_health_check and reviewing the
+        results. Clears any oil_change_due advisory on the plan.
+
+        Args:
+            plan_id: The plan ID to record the oil change for
+            health_check_id: The sentinel_health_check result ID
+            commits_since_last: Number of commits since last health check
+        """
+        from morpheus_mcp.core.store import MorpheusStore
+
+        try:
+            with MorpheusStore(_config.db_path) as store:
+                plan = store.get_plan(plan_id)
+                if plan is None:
+                    return f"Error: Plan '{plan_id}' not found"
+                entry_id = store.save_oil_change(
+                    plan_id, health_check_id, commits_since_last,
+                )
+                return (
+                    f"Oil change recorded: `{entry_id[:12]}`\n"
+                    f"- Plan: {plan.name}\n"
+                    f"- Health check: {health_check_id}\n"
+                    f"- Commits: {commits_since_last}"
+                )
         except (sqlite3.Error, OSError) as exc:
             return f"Error: {exc}"
 

@@ -230,6 +230,30 @@ def init_plan(
     return plan.id
 
 
+def check_oil_change_advisory(
+    store: MorpheusStore,
+    project: str,
+    oil_change_interval: int = 40,
+) -> str | None:
+    """Check if an oil change is recommended for this project.
+
+    Returns an advisory message if commits since last oil change exceed
+    the interval, or None if the project is within the interval.
+    """
+    last = store.get_last_oil_change(project)
+    if last is None:
+        return None  # No oil change history — can't advise yet
+    commit_count = last["commit_count"]
+    if commit_count >= oil_change_interval:
+        return (
+            f"Oil change recommended: {commit_count} commits since last "
+            f"health check (threshold: {oil_change_interval}). Run "
+            f"`sentinel_health_check`, review results, then call "
+            f"`morpheus_oil_change`."
+        )
+    return None
+
+
 def advance(
     store: MorpheusStore,
     task_id: str,

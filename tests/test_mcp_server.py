@@ -34,15 +34,16 @@ def plan_file(tmp_path):
 
 
 class TestCreateServer:
-    def test_has_7_tools(self, server):
-        """Server registers exactly 7 tools."""
+    def test_has_8_tools(self, server):
+        """Server registers exactly 8 tools."""
         tools = [t.name for t in server._tool_manager.list_tools()]
-        assert len(tools) == 7
+        assert len(tools) == 8
         assert "morpheus_init" in tools
         assert "morpheus_status" in tools
         assert "morpheus_advance" in tools
         assert "morpheus_advance_batch" in tools
         assert "morpheus_progress" in tools
+        assert "morpheus_oil_change" in tools
         assert "morpheus_version" in tools
         assert "morpheus_close" in tools
 
