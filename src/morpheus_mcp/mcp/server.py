@@ -3,7 +3,37 @@
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
+
+logger = logging.getLogger(__name__)
+
+
+def _self_test(db_path: str) -> bool:
+    """Quick round-trip to verify the store is healthy.
+
+    Creates a minimal plan, reads it back, deletes it.
+    Returns True if healthy, False if degraded.
+    """
+    from morpheus_mcp.core.store import MorpheusStore
+    from morpheus_mcp.models.enums import PlanStatus
+    from morpheus_mcp.models.plan import PlanRecord
+
+    test_id = "__selftest__"
+    try:
+        with MorpheusStore(db_path) as store:
+            plan = PlanRecord(
+                id=test_id, name="self-test", project="__test__",
+                test_command="true", status=PlanStatus.PENDING,
+            )
+            store.save_plan(plan)
+            retrieved = store.get_plan(test_id)
+            store.conn.execute("DELETE FROM plans WHERE id = ?", (test_id,))
+            store.conn.commit()
+            return retrieved is not None
+    except Exception:
+        logger.warning("Morpheus self-test failed — running in degraded mode", exc_info=True)
+        return False
 
 
 def create_server(config=None):
@@ -20,6 +50,7 @@ def create_server(config=None):
         ),
     )
     _config = config or MorpheusConfig.load()
+    _degraded = not _self_test(_config.db_path)
 
     @mcp.tool()
     def morpheus_init(plan_file: str) -> str:
@@ -40,7 +71,14 @@ def create_server(config=None):
             plan, tasks = parse_plan_file(plan_file)
             with MorpheusStore(_config.db_path) as store:
                 init_plan(store, plan, tasks)
-                return format_plan_summary(plan, tasks)
+                summary = format_plan_summary(plan, tasks)
+                if _degraded:
+                    summary = (
+                        "**WARNING:** Morpheus is running in degraded mode "
+                        "— self-test failed on startup. Phase evidence may "
+                        "not persist correctly.\n\n" + summary
+                    )
+                return summary
         except (FileNotFoundError, ValueError, sqlite3.Error, OSError) as exc:
             return f"Error: {exc}"
 

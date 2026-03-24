@@ -47,6 +47,26 @@ class TestCreateServer:
         assert "morpheus_close" in tools
 
 
+class TestSelfTest:
+    def test_self_test_passes_on_healthy_db(self, tmp_path):
+        """Self-test should pass on a fresh database."""
+        from morpheus_mcp.mcp.server import _self_test
+
+        db_path = str(tmp_path / "morpheus.db")
+        assert _self_test(db_path) is True
+
+    def test_self_test_cleans_up(self, tmp_path):
+        """Self-test plan should not remain in the database."""
+        from morpheus_mcp.core.store import MorpheusStore
+        from morpheus_mcp.mcp.server import _self_test
+
+        db_path = str(tmp_path / "morpheus.db")
+        _self_test(db_path)
+        with MorpheusStore(db_path) as store:
+            plans = store.list_plans()
+            assert all(p.id != "__selftest__" for p in plans)
+
+
 class TestMorpheusInit:
     def test_init_returns_summary(self, server, plan_file):
         """morpheus_init returns a plan summary."""
