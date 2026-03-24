@@ -69,6 +69,8 @@ def validate_evidence(
     grade_enabled: bool = True,
     task_size: TaskSize = TaskSize.MEDIUM,
     plan_mode: str = "standard",
+    task_count: int = 0,
+    knowledge_gate_task_threshold: int = 5,
 ) -> GateResult:
     """Validate that evidence satisfies the gate requirements for a phase.
 
@@ -78,6 +80,8 @@ def validate_evidence(
         grade_enabled: Whether the plan has grading enabled.
         task_size: Task size tier — affects gate strictness.
         plan_mode: Plan mode — 'greenfield' relaxes sibling_read.
+        task_count: Total tasks in the plan — small plans relax knowledge gate.
+        knowledge_gate_task_threshold: Plans below this count skip knowledge gate.
 
     Returns:
         GateResult with passed=True if gate is satisfied, or
@@ -117,6 +121,14 @@ def validate_evidence(
                 continue
             if phase == Phase.ADVANCE and key == "knowledge_gate":
                 continue
+
+        # Small plans: skip knowledge_gate when plan has fewer tasks than threshold
+        if (
+            phase == Phase.ADVANCE
+            and key == "knowledge_gate"
+            and 0 < task_count < knowledge_gate_task_threshold
+        ):
+            continue
 
         # Greenfield mode: sibling_read not required
         if phase == Phase.CODE and key == "sibling_read" and plan_mode == "greenfield":
@@ -220,6 +232,7 @@ def advance(
     phase: Phase,
     evidence: dict[str, Any],
     skip_reason: str = "",
+    knowledge_gate_task_threshold: int = 5,
 ) -> AdvanceResult:
     """Validate gate and record phase completion.
 
@@ -229,6 +242,7 @@ def advance(
         phase: The phase being completed.
         evidence: Evidence dict for gate validation.
         skip_reason: When provided, fills missing evidence to bypass the gate.
+        knowledge_gate_task_threshold: Plans below this task count skip knowledge gate.
 
     Returns:
         Tuple of (GateResult, PhaseRecord if gate passed else None).
@@ -272,9 +286,11 @@ def advance(
 
     # Validate the gate evidence
     plan_mode = plan.mode if plan else "standard"
+    task_count = len(store.get_tasks(task.plan_id)) if plan else 0
     result = validate_evidence(
         phase, evidence, grade_enabled=grade_enabled, task_size=task.size,
-        plan_mode=plan_mode,
+        plan_mode=plan_mode, task_count=task_count,
+        knowledge_gate_task_threshold=knowledge_gate_task_threshold,
     )
     if not result.passed:
         # Record the rejection

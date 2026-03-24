@@ -117,7 +117,11 @@ def create_server(config=None):
 
         try:
             with MorpheusStore(_config.db_path) as store:
-                result, phase_record = advance(store, task_id, phase_enum, evidence_dict, skip_reason=skip_reason)
+                result, phase_record = advance(
+                    store, task_id, phase_enum, evidence_dict,
+                    skip_reason=skip_reason,
+                    knowledge_gate_task_threshold=_config.gates.knowledge_gate_task_threshold,
+                )
 
                 if not result.passed:
                     return format_advance_rejection(phase_enum, result.message)

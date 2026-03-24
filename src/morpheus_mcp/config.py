@@ -49,12 +49,20 @@ class McpConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class GateConfig:
+    """Gate enforcement configuration."""
+
+    knowledge_gate_task_threshold: int = 5
+
+
+@dataclass(frozen=True, slots=True)
 class MorpheusConfig:
     """Top-level configuration container."""
 
     data_dir: Path = field(default_factory=_default_data_dir)
     store: StoreConfig = field(default_factory=StoreConfig)
     mcp: McpConfig = field(default_factory=McpConfig)
+    gates: GateConfig = field(default_factory=GateConfig)
 
     @property
     def morpheus_dir(self) -> Path:
@@ -79,9 +87,11 @@ class MorpheusConfig:
 
         store_data = toml_data.get("store", {})
         mcp_data = toml_data.get("mcp", {})
+        gates_data = toml_data.get("gates", {})
 
         _store_defaults = StoreConfig()
         _mcp_defaults = McpConfig()
+        _gate_defaults = GateConfig()
 
         store = StoreConfig(
             db_name=os.environ.get(
@@ -99,4 +109,16 @@ class MorpheusConfig:
             ),
         )
 
-        return cls(data_dir=resolved_dir, store=store, mcp=mcp)
+        gates = GateConfig(
+            knowledge_gate_task_threshold=int(
+                os.environ.get(
+                    "MORPHEUS_KNOWLEDGE_GATE_TASK_THRESHOLD",
+                    gates_data.get(
+                        "knowledge_gate_task_threshold",
+                        _gate_defaults.knowledge_gate_task_threshold,
+                    ),
+                )
+            ),
+        )
+
+        return cls(data_dir=resolved_dir, store=store, mcp=mcp, gates=gates)

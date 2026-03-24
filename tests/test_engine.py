@@ -461,6 +461,83 @@ class TestSimplifiedKnowledgeGate:
         assert r.passed is True
 
 
+class TestAdaptiveKnowledgeGate:
+    """Tests for plan-size-based knowledge gate relaxation."""
+
+    def test_small_plan_skips_knowledge_gate(self):
+        """Plans with fewer tasks than threshold skip knowledge_gate."""
+        r = validate_evidence(
+            Phase.ADVANCE, {}, task_count=3, knowledge_gate_task_threshold=5,
+        )
+        assert r.passed is True
+
+    def test_large_plan_enforces_knowledge_gate(self):
+        """Plans at or above threshold enforce knowledge_gate."""
+        r = validate_evidence(
+            Phase.ADVANCE, {}, task_count=5, knowledge_gate_task_threshold=5,
+        )
+        assert r.passed is False
+        assert "knowledge_gate" in r.message
+
+    def test_unknown_task_count_enforces_gate(self):
+        """task_count=0 (unknown) still enforces knowledge_gate."""
+        r = validate_evidence(
+            Phase.ADVANCE, {}, task_count=0, knowledge_gate_task_threshold=5,
+        )
+        assert r.passed is False
+
+    def test_custom_threshold(self):
+        """Custom threshold is respected."""
+        # 3 tasks, threshold 3 — should enforce (not below)
+        r = validate_evidence(
+            Phase.ADVANCE, {}, task_count=3, knowledge_gate_task_threshold=3,
+        )
+        assert r.passed is False
+
+        # 2 tasks, threshold 3 — should skip
+        r = validate_evidence(
+            Phase.ADVANCE, {}, task_count=2, knowledge_gate_task_threshold=3,
+        )
+        assert r.passed is True
+
+    def test_small_plan_still_accepts_knowledge_gate(self):
+        """Small plans still accept knowledge_gate if provided."""
+        r = validate_evidence(
+            Phase.ADVANCE,
+            {"knowledge_gate": "nothing_surprised", "knowledge_reason": "simple change"},
+            task_count=3, knowledge_gate_task_threshold=5,
+        )
+        assert r.passed is True
+
+    def test_small_task_overrides_plan_size(self):
+        """SMALL task size still skips regardless of plan size."""
+        r = validate_evidence(
+            Phase.ADVANCE, {}, task_size=TaskSize.SMALL,
+            task_count=10, knowledge_gate_task_threshold=5,
+        )
+        assert r.passed is True
+
+    def test_adaptive_gate_full_lifecycle(self, store):
+        """Small plan (3 tasks) completes ADVANCE without knowledge_gate."""
+        plan = PlanRecord(name="SmallPlan", project="/tmp")
+        store.save_plan(plan)
+        for i in range(1, 4):
+            store.save_task(TaskRecord(plan_id=plan.id, seq=i, title=f"T{i}"))
+        store.update_plan_status(plan.id, PlanStatus.ACTIVE)
+
+        task = store.get_tasks(plan.id)[0]
+
+        # Walk through all phases
+        advance(store, task.id, Phase.CHECK, {})
+        advance(store, task.id, Phase.CODE, {"sibling_read": "test.py"})
+        advance(store, task.id, Phase.TEST, {"build_verified": "ok"})
+        advance(store, task.id, Phase.GRADE, {"tests_passed": "ok", "fdmc_review": "ok"})
+        advance(store, task.id, Phase.COMMIT, {"seraph_id": "abc123"})
+        # ADVANCE without knowledge_gate — plan has 3 tasks < threshold 5
+        result, _ = advance(store, task.id, Phase.ADVANCE, {})
+        assert result.passed is True
+
+
 class TestSkipReason:
     """Tests for skip_reason gate bypass."""
 
