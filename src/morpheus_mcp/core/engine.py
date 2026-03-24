@@ -27,7 +27,7 @@ GATES: dict[Phase, dict[str, str]] = {
         "fdmc_review": "FDMC lens one-liner: what you checked or fixed post-code",
     },
     Phase.COMMIT: {
-        "seraph_id": "Seraph assessment ID (or 'grade_disabled' if plan has grade=false)",
+        "seraph_id": "Seraph assessment ID, 'grade_disabled', or 'seraph_unavailable'",
     },
     Phase.ADVANCE: {
         "knowledge_gate": (
@@ -43,7 +43,7 @@ GATE_EXAMPLES: dict[Phase, str] = {
     Phase.CODE: '{"sibling_read": "src/core/parser.py"}',
     Phase.TEST: '{"build_verified": "python -m py_compile src/main.py — OK"}',
     Phase.GRADE: '{"tests_passed": "12 passed, 0 failed", "fdmc_review": "Consistent — matched existing pattern"}',
-    Phase.COMMIT: '{"seraph_id": "a1b2c3d4"}',
+    Phase.COMMIT: '{"seraph_id": "a1b2c3d4"} or {"seraph_id": "seraph_unavailable"}',
     Phase.ADVANCE: '{"knowledge_gate": "nothing_surprised", "knowledge_reason": "followed established pattern from Task 1"}',
 }
 
@@ -128,6 +128,15 @@ def validate_evidence(
             if task_size != TaskSize.LARGE:
                 continue
 
+        # COMMIT gate: accept "seraph_unavailable" for non-LARGE tasks
+        if (
+            phase == Phase.COMMIT
+            and key == "seraph_id"
+            and evidence.get("seraph_id") == "seraph_unavailable"
+            and task_size != TaskSize.LARGE
+        ):
+            continue
+
         if key not in evidence or not evidence[key]:
             missing.append(f"'{key}': {description}")
 
@@ -144,6 +153,20 @@ def validate_evidence(
                 f"Gate '{phase.value}' expected keys: [{expected_keys}]. "
                 f"You provided: [{provided_line}]. "
                 f"Missing:\n  - {missing_str}{example_line}"
+            ),
+        )
+
+    # COMMIT phase: LARGE tasks reject "seraph_unavailable" — they need a real ID
+    if (
+        phase == Phase.COMMIT
+        and task_size == TaskSize.LARGE
+        and evidence.get("seraph_id") == "seraph_unavailable"
+    ):
+        return GateResult(
+            passed=False,
+            message=(
+                "LARGE tasks require a real Seraph assessment ID — "
+                "'seraph_unavailable' is only accepted for SMALL/MEDIUM tasks."
             ),
         )
 

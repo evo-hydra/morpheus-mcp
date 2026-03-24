@@ -220,6 +220,21 @@ class TestSizeAwareGates:
         )
         assert r.passed is True
 
+    def test_medium_accepts_seraph_unavailable(self):
+        """MEDIUM tasks accept 'seraph_unavailable' as valid seraph_id."""
+        r = validate_evidence(
+            Phase.COMMIT, {"seraph_id": "seraph_unavailable"}, task_size=TaskSize.MEDIUM,
+        )
+        assert r.passed is True
+
+    def test_large_rejects_seraph_unavailable(self):
+        """LARGE tasks reject 'seraph_unavailable' — they always need a real ID."""
+        r = validate_evidence(
+            Phase.COMMIT, {"seraph_id": "seraph_unavailable"}, task_size=TaskSize.LARGE,
+        )
+        assert r.passed is False
+        assert "LARGE" in r.message
+
     def test_small_full_lifecycle(self, store, sample_plan_record):
         """SMALL tasks can complete the full lifecycle with minimal evidence."""
         store.save_plan(sample_plan_record)
