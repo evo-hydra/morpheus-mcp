@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import json
 import sqlite3
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -375,8 +375,6 @@ class MorpheusStore:
 
     def save_progress(self, task_id: str, message: str) -> str:
         """Log a progress entry for a task. Returns the entry ID."""
-        import uuid
-
         entry_id = uuid.uuid4().hex
         self.conn.execute(
             "INSERT INTO progress_log(id, task_id, message, created_at) VALUES (?, ?, ?, ?)",
