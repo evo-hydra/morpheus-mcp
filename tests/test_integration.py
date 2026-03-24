@@ -353,3 +353,96 @@ def test_invalid_size_lifecycle(tmp_path):
 
         closed = close_plan(store, plan_id)
         assert closed.status == PlanStatus.COMPLETED
+
+
+def test_oil_change_lifecycle(tmp_path):
+    """Full oil change lifecycle: due → reject → clear → proceed."""
+    config = MorpheusConfig.load(tmp_path / "data")
+
+    # Create an initial plan with a recorded oil change to set history
+    setup_plan_file = tmp_path / "setup-plan.md"
+    setup_plan_file.write_text(
+        "---\n"
+        "name: Setup Plan\n"
+        "project: /tmp/oil-test\n"
+        'test_command: "echo ok"\n'
+        "---\n\n"
+        "## 1. Setup task\n"
+        "- **files**: setup.py\n"
+        "- **do**: Setup\n"
+        "- **done-when**: Done\n"
+        "- **status**: pending\n"
+    )
+    setup_plan, setup_tasks = parse_plan_file(setup_plan_file)
+
+    with MorpheusStore(config.db_path) as store:
+        # Init setup plan and record an oil change with high commit count
+        setup_id = init_plan(store, setup_plan, setup_tasks)
+        store.save_oil_change(setup_id, "hc-old", 50)
+
+        # Now create the actual plan — init should detect oil_change_due
+        plan_file = tmp_path / "test-plan.md"
+        plan_file.write_text(
+            "---\n"
+            "name: Oil Change Test\n"
+            "project: /tmp/oil-test\n"
+            'test_command: "echo ok"\n'
+            "---\n\n"
+            "## 1. First task\n"
+            "- **files**: src/a.py\n"
+            "- **do**: Do A\n"
+            "- **done-when**: A done\n"
+            "- **status**: pending\n\n"
+            "## 2. Second task\n"
+            "- **files**: src/b.py\n"
+            "- **do**: Do B\n"
+            "- **done-when**: B done\n"
+            "- **status**: pending\n"
+        )
+        plan, tasks = parse_plan_file(plan_file)
+        plan_id = init_plan(store, plan, tasks, oil_change_interval=40)
+
+        # Plan should have oil_change_due set
+        loaded_plan = store.get_plan(plan_id)
+        assert loaded_plan.oil_change_due is True
+
+        t1, t2 = store.get_tasks(plan_id)
+
+        # First task CHECK should be rejected
+        result, _ = advance(store, t1.id, Phase.CHECK, {})
+        assert result.passed is False
+        assert "Oil change required" in result.message
+
+        # Record oil change to clear the gate
+        store.save_oil_change(plan_id, "hc-fresh", 0)
+        store.set_oil_change_due(plan_id, False)
+
+        # Now first task CHECK should pass
+        result, _ = advance(store, t1.id, Phase.CHECK, {})
+        assert result.passed is True
+
+        # Complete t1
+        advance(store, t1.id, Phase.CODE, {"sibling_read": "setup.py"})
+        advance(store, t1.id, Phase.TEST, {"build_verified": "ok"})
+        advance(store, t1.id, Phase.GRADE, {"tests_passed": "ok", "fdmc_review": "ok"})
+        advance(store, t1.id, Phase.COMMIT, {"seraph_id": "abc"})
+        advance(store, t1.id, Phase.ADVANCE, {"knowledge_gate": "true"})
+        assert store.get_task(t1.id).status == TaskStatus.DONE
+
+        # Second task should not be gated
+        result, _ = advance(store, t2.id, Phase.CHECK, {})
+        assert result.passed is True
+
+        # Verify oil_changes table has both records
+        cur = store.conn.execute("SELECT COUNT(*) FROM oil_changes")
+        assert cur.fetchone()[0] == 2
+
+        # Complete t2 and close
+        advance(store, t2.id, Phase.CODE, {"sibling_read": "src/a.py"})
+        advance(store, t2.id, Phase.TEST, {"build_verified": "ok"})
+        advance(store, t2.id, Phase.GRADE, {"tests_passed": "ok", "fdmc_review": "ok"})
+        advance(store, t2.id, Phase.COMMIT, {"seraph_id": "def"})
+        advance(store, t2.id, Phase.ADVANCE, {"knowledge_gate": "true"})
+
+        closed = close_plan(store, plan_id)
+        assert closed.status == PlanStatus.COMPLETED
