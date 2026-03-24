@@ -313,8 +313,10 @@ def advance(
     )
     store.save_phase(completed)
 
-    # If this is the ADVANCE phase, mark the task as done
-    if phase == Phase.ADVANCE:
+    # Update task status based on phase progression
+    if phase == Phase.CHECK:
+        store.update_task_status(full_id, TaskStatus.IN_PROGRESS)
+    elif phase == Phase.ADVANCE:
         store.update_task_status(full_id, TaskStatus.DONE)
 
     return result, completed

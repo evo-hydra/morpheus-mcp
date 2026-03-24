@@ -338,6 +338,15 @@ class TestAdvance:
         assert phase is not None
         assert phase.status == PhaseStatus.COMPLETED
 
+    def test_advance_check_sets_in_progress(self, store, sample_plan_record):
+        """Advancing CHECK sets task status to IN_PROGRESS."""
+        store.save_plan(sample_plan_record)
+        task = TaskRecord(plan_id=sample_plan_record.id, seq=1, title="T1")
+        store.save_task(task)
+        advance(store, task.id, Phase.CHECK, {})
+        retrieved = store.get_task(task.id)
+        assert retrieved.status == TaskStatus.IN_PROGRESS
+
     def test_advance_code_rejected(self, store, sample_plan_record):
         """Advancing CODE with missing evidence is rejected."""
         store.save_plan(sample_plan_record)
