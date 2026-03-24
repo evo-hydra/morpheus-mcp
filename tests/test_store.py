@@ -203,6 +203,46 @@ class TestTaskCRUD:
             assert retrieved.size == size
 
 
+class TestGetTasksByStatus:
+    def test_filters_by_status(self, store, sample_plan_record, sample_task_records):
+        """Returns only tasks matching the requested status."""
+        store.save_plan(sample_plan_record)
+        for t in sample_task_records:
+            store.save_task(t)
+        # Mark first task done
+        store.update_task_status(sample_task_records[0].id, TaskStatus.DONE)
+        done = store.get_tasks_by_status(sample_plan_record.id, TaskStatus.DONE)
+        assert len(done) == 1
+        assert done[0].id == sample_task_records[0].id
+        pending = store.get_tasks_by_status(sample_plan_record.id, TaskStatus.PENDING)
+        assert len(pending) == 2
+
+    def test_empty_result(self, store, sample_plan_record):
+        """Returns empty list when no tasks match status."""
+        store.save_plan(sample_plan_record)
+        assert store.get_tasks_by_status(sample_plan_record.id, TaskStatus.FAILED) == []
+
+
+class TestCountTasksByStatus:
+    def test_counts(self, store, sample_plan_record, sample_task_records):
+        """Returns correct counts grouped by status."""
+        store.save_plan(sample_plan_record)
+        for t in sample_task_records:
+            store.save_task(t)
+        store.update_task_status(sample_task_records[0].id, TaskStatus.DONE)
+        store.update_task_status(sample_task_records[1].id, TaskStatus.FAILED)
+        counts = store.count_tasks_by_status(sample_plan_record.id)
+        assert counts[TaskStatus.DONE] == 1
+        assert counts[TaskStatus.FAILED] == 1
+        assert counts[TaskStatus.PENDING] == 1
+
+    def test_empty_plan(self, store, sample_plan_record):
+        """Returns empty dict when plan has no tasks."""
+        store.save_plan(sample_plan_record)
+        counts = store.count_tasks_by_status(sample_plan_record.id)
+        assert counts == {}
+
+
 class TestPhaseCRUD:
     def test_save_and_get(self, store, sample_plan_record):
         """Save and retrieve phases."""

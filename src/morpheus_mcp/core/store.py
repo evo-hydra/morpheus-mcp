@@ -304,6 +304,24 @@ class MorpheusStore:
             return None
         return self._row_to_task(row)
 
+    def get_tasks_by_status(
+        self, plan_id: str, status: TaskStatus
+    ) -> list[TaskRecord]:
+        """Get all tasks for a plan with a specific status, ordered by seq."""
+        cur = self.conn.execute(
+            "SELECT * FROM tasks WHERE plan_id = ? AND status = ? ORDER BY seq",
+            (plan_id, status.value),
+        )
+        return [self._row_to_task(row) for row in cur.fetchall()]
+
+    def count_tasks_by_status(self, plan_id: str) -> dict[TaskStatus, int]:
+        """Count tasks grouped by status for a plan."""
+        cur = self.conn.execute(
+            "SELECT status, COUNT(*) FROM tasks WHERE plan_id = ? GROUP BY status",
+            (plan_id,),
+        )
+        return {TaskStatus(row[0]): row[1] for row in cur.fetchall()}
+
     # --- Phase CRUD ---
 
     def save_phase(self, phase: PhaseRecord) -> None:
