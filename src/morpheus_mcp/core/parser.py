@@ -80,11 +80,13 @@ def parse_plan_file(path: str | Path) -> tuple[PlanRecord, list[TaskRecord]]:
     if not fm:
         raise ValueError(f"No frontmatter found in {path}")
 
-    grade_raw = fm.get("grade", "true").lower()
-    grade_enabled = grade_raw not in ("false", "no", "0")
-
     mode_raw = fm.get("mode", "standard").strip().lower()
     mode = mode_raw if mode_raw in ("standard", "greenfield") else "standard"
+
+    # Greenfield plans default grade to false — Seraph has nothing to diff against.
+    grade_default = "false" if mode == "greenfield" and "grade" not in fm else "true"
+    grade_raw = fm.get("grade", grade_default).lower()
+    grade_enabled = grade_raw not in ("false", "no", "0")
 
     plan = PlanRecord(
         name=fm.get("name", path.stem),
