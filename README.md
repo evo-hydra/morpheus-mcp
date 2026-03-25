@@ -2,7 +2,22 @@
 
 Plan state management and phase gate enforcement for AI dev loops via MCP. Morpheus tracks plan progress, enforces phase gates with evidence requirements, and coordinates task lifecycle across agents.
 
-Part of the [EvoIntel](https://github.com/evo-hydra) suite: Sentinel, Seraph, Niobe, Merovingian, Morpheus, Anno.
+## Part of EvoIntel
+
+Morpheus is one server in a suite designed to work together. Each handles a different concern in the AI development loop:
+
+| Server | Role |
+|--------|------|
+| **[Morpheus](https://github.com/evo-hydra/morpheus-mcp)** | Plan state & phase gate enforcement *(you are here)* |
+| **[Sentinel](https://github.com/evo-hydra/sentinel)** | Persistent project intelligence — conventions, pitfalls, co-changes |
+| **[Seraph](https://github.com/evo-hydra/seraph)** | Verification intelligence for AI-generated code |
+| **[Niobe](https://github.com/evo-hydra/niobe)** | Runtime intelligence & log analysis |
+| **[Merovingian](https://github.com/evo-hydra/merovingian)** | Cross-repo dependency tracking & contract management |
+| **[Anno](https://github.com/evo-hydra/anno)** | Web content extraction via stealth browser |
+
+Each server runs independently, but they reinforce each other. Morpheus orchestrates the dev loop. Sentinel and Seraph provide the intelligence Morpheus gates on. Niobe watches runtime. Merovingian tracks what breaks across repos.
+
+→ [github.com/evo-hydra](https://github.com/evo-hydra)
 
 ## Install
 

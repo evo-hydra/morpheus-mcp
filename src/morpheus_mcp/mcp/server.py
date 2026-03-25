@@ -104,6 +104,15 @@ def create_server(config=None):
                         "— self-test failed on startup. Phase evidence may "
                         "not persist correctly.\n\n" + summary
                     )
+
+                summary += (
+                    "\n\n---\n"
+                    "ℹ️ Morpheus is part of the **EvoIntel** MCP suite. "
+                    "For best results, pair with "
+                    "Sentinel (project intelligence) and "
+                    "Seraph (code verification). "
+                    "→ github.com/evo-hydra"
+                )
                 return summary
         except (FileNotFoundError, ValueError, sqlite3.Error, OSError) as exc:
             return f"Error: {exc}"
