@@ -1,4 +1,4 @@
-"""FastMCP server factory with 7 MCP tools."""
+"""FastMCP server factory with 9 MCP tools."""
 
 from __future__ import annotations
 
@@ -321,6 +321,77 @@ def create_server(config=None):
                     f"- Commits: {commits_since_last}\n"
                     f"- Oil change gate: cleared"
                 )
+        except (sqlite3.Error, OSError) as exc:
+            return f"Error: {exc}"
+
+    @mcp.tool()
+    def morpheus_reflect(
+        plan_id: str,
+        task_id: str,
+        gate: str,
+        caught_issue: bool = False,
+        changed_code: bool = False,
+        detail: str = "",
+    ) -> str:
+        """Record whether a gate caught a real issue or was ceremony.
+
+        Call this after each gate fires to build the Reflect dataset.
+        Over time, this data reveals which gates produce value and which
+        burn tokens without changing behavior.
+
+        Args:
+            plan_id: The plan ID
+            task_id: The task ID
+            gate: Gate name (e.g., "sibling_read", "fdmc_review", "seraph_assess", "knowledge_gate")
+            caught_issue: True if the gate found something actionable
+            changed_code: True if code was modified because of this gate
+            detail: Brief description of what happened (e.g., "matched singleton pattern from sibling" or "no issues found")
+        """
+        from morpheus_mcp.core.store import MorpheusStore
+
+        try:
+            with MorpheusStore(_config.db_path) as store:
+                outcome_id = store.record_gate_outcome(
+                    plan_id, task_id, gate,
+                    caught_issue=caught_issue,
+                    changed_code=changed_code,
+                    detail=detail,
+                )
+                status = "CAUGHT" if caught_issue else "CLEAR"
+                changed = " → code changed" if changed_code else ""
+                return f"Reflect recorded: `{outcome_id[:12]}` — {gate}: **{status}**{changed}"
+        except (sqlite3.Error, OSError) as exc:
+            return f"Error: {exc}"
+
+    @mcp.tool()
+    def morpheus_gate_summary(plan_id: str | None = None) -> str:
+        """Summarize gate outcomes: how often each gate fired, caught issues, changed code.
+
+        Returns lifetime stats across all plans if plan_id is omitted.
+        Use this to identify which gates produce value and which are ceremony.
+
+        Args:
+            plan_id: Optional plan ID to scope the summary
+        """
+        from morpheus_mcp.core.store import MorpheusStore
+
+        try:
+            with MorpheusStore(_config.db_path) as store:
+                summary = store.get_gate_summary(plan_id=plan_id)
+                if not summary:
+                    return "No gate outcomes recorded yet. Use `morpheus_reflect` after each gate."
+
+                lines = ["## Gate Outcomes\n"]
+                lines.append("| Gate | Fired | Caught | Changed | Hit Rate |")
+                lines.append("|------|-------|--------|---------|----------|")
+                for row in summary:
+                    fired = row["fired"]
+                    caught = row["caught"]
+                    rate = f"{caught / fired:.0%}" if fired > 0 else "—"
+                    lines.append(
+                        f"| {row['gate']} | {fired} | {caught} | {row['changed']} | {rate} |"
+                    )
+                return "\n".join(lines)
         except (sqlite3.Error, OSError) as exc:
             return f"Error: {exc}"
 

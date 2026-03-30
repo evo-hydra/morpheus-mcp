@@ -34,16 +34,18 @@ def plan_file(tmp_path):
 
 
 class TestCreateServer:
-    def test_has_8_tools(self, server):
-        """Server registers exactly 8 tools."""
+    def test_has_10_tools(self, server):
+        """Server registers exactly 10 tools."""
         tools = [t.name for t in server._tool_manager.list_tools()]
-        assert len(tools) == 8
+        assert len(tools) == 10
         assert "morpheus_init" in tools
         assert "morpheus_status" in tools
         assert "morpheus_advance" in tools
         assert "morpheus_advance_batch" in tools
         assert "morpheus_progress" in tools
         assert "morpheus_oil_change" in tools
+        assert "morpheus_reflect" in tools
+        assert "morpheus_gate_summary" in tools
         assert "morpheus_version" in tools
         assert "morpheus_close" in tools
 
@@ -244,6 +246,74 @@ class TestMorpheusAdvanceBatch:
         server._tool_manager._tools["morpheus_init"].fn(str(plan_file))
         result = server._tool_manager._tools["morpheus_advance_batch"].fn("not json")
         assert "Error" in result
+
+
+class TestMorpheusReflect:
+    def test_reflect_records_outcome(self, server, plan_file):
+        """morpheus_reflect records a gate outcome and returns confirmation."""
+        init_result = server._tool_manager._tools["morpheus_init"].fn(str(plan_file))
+        plan_id = _extract_plan_id(init_result)
+        task_id = _extract_task_id(init_result, "Task one")
+        result = server._tool_manager._tools["morpheus_reflect"].fn(
+            plan_id, task_id, "sibling_read",
+            caught_issue=True, changed_code=True,
+            detail="Matched singleton pattern from sibling",
+        )
+        assert "Reflect recorded" in result
+        assert "CAUGHT" in result
+        assert "code changed" in result
+
+    def test_reflect_clear_outcome(self, server, plan_file):
+        """morpheus_reflect records a clear (no issue) outcome."""
+        init_result = server._tool_manager._tools["morpheus_init"].fn(str(plan_file))
+        plan_id = _extract_plan_id(init_result)
+        task_id = _extract_task_id(init_result, "Task one")
+        result = server._tool_manager._tools["morpheus_reflect"].fn(
+            plan_id, task_id, "seraph_assess",
+            caught_issue=False, changed_code=False,
+            detail="Grade A, no action needed",
+        )
+        assert "Reflect recorded" in result
+        assert "CLEAR" in result
+        assert "code changed" not in result
+
+
+class TestMorpheusGateSummary:
+    def test_empty_summary(self, server, plan_file):
+        """morpheus_gate_summary returns message when no outcomes exist."""
+        result = server._tool_manager._tools["morpheus_gate_summary"].fn()
+        assert "No gate outcomes" in result
+
+    def test_summary_after_reflect(self, server, plan_file):
+        """morpheus_gate_summary returns table after recording outcomes."""
+        init_result = server._tool_manager._tools["morpheus_init"].fn(str(plan_file))
+        plan_id = _extract_plan_id(init_result)
+        task_id = _extract_task_id(init_result, "Task one")
+
+        # Record some outcomes
+        reflect = server._tool_manager._tools["morpheus_reflect"].fn
+        reflect(plan_id, task_id, "sibling_read", True, True, "caught duplicate")
+        reflect(plan_id, task_id, "seraph_assess", False, False, "grade A")
+        reflect(plan_id, task_id, "fdmc_review", True, True, "Consistent violation")
+
+        result = server._tool_manager._tools["morpheus_gate_summary"].fn()
+        assert "Gate Outcomes" in result
+        assert "sibling_read" in result
+        assert "seraph_assess" in result
+        assert "fdmc_review" in result
+        assert "Hit Rate" in result
+
+    def test_summary_scoped_to_plan(self, server, plan_file):
+        """morpheus_gate_summary can be scoped to a specific plan."""
+        init_result = server._tool_manager._tools["morpheus_init"].fn(str(plan_file))
+        plan_id = _extract_plan_id(init_result)
+        task_id = _extract_task_id(init_result, "Task one")
+
+        server._tool_manager._tools["morpheus_reflect"].fn(
+            plan_id, task_id, "sibling_read", True, True, "found issue",
+        )
+        result = server._tool_manager._tools["morpheus_gate_summary"].fn(plan_id)
+        assert "sibling_read" in result
 
 
 class TestMorpheusCloseEdgeCases:
