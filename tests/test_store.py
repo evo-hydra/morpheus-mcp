@@ -46,7 +46,7 @@ class TestSchemaVersion:
         cur = store.conn.execute(
             "SELECT value FROM morpheus_meta WHERE key='schema_version'"
         )
-        assert cur.fetchone()[0] == "6"
+        assert cur.fetchone()[0] == "7"
 
     def test_idempotent_open(self, tmp_path):
         """Opening twice doesn't change schema version."""
@@ -57,7 +57,7 @@ class TestSchemaVersion:
             cur = s.conn.execute(
                 "SELECT value FROM morpheus_meta WHERE key='schema_version'"
             )
-            assert cur.fetchone()[0] == "6"
+            assert cur.fetchone()[0] == "7"
 
 
 class TestPlanCRUD:
@@ -524,3 +524,73 @@ class TestProgressLog:
         store.conn.execute("DELETE FROM plans WHERE id = ?", (sample_plan_record.id,))
         store.conn.commit()
         assert store.get_progress(task.id) == []
+
+
+class TestGateOutcomes:
+    """Tests for the Reflect table — tracking which gates produce value."""
+
+    def test_record_and_summarize(self, store, sample_plan_record):
+        """Record gate outcomes and get summary."""
+        store.save_plan(sample_plan_record)
+        task = TaskRecord(plan_id=sample_plan_record.id, seq=1, title="T1")
+        store.save_task(task)
+
+        # Record outcomes
+        store.record_gate_outcome(sample_plan_record.id, task.id, "sibling_read",
+                                  caught_issue=True, changed_code=True,
+                                  detail="Prevented duplicate type")
+        store.record_gate_outcome(sample_plan_record.id, task.id, "seraph_assess",
+                                  caught_issue=False, changed_code=False,
+                                  detail="Grade A, no action needed")
+        store.record_gate_outcome(sample_plan_record.id, task.id, "sentinel_whisper",
+                                  caught_issue=True, changed_code=True,
+                                  detail="Convention contradiction: class vs function")
+
+        summary = store.get_gate_summary(plan_id=sample_plan_record.id)
+        assert len(summary) == 3
+
+        # Find sibling_read in summary
+        sr = next(s for s in summary if s["gate"] == "sibling_read")
+        assert sr["fired"] == 1
+        assert sr["caught"] == 1
+        assert sr["changed"] == 1
+
+        # Find seraph — fired but didn't catch anything
+        se = next(s for s in summary if s["gate"] == "seraph_assess")
+        assert se["fired"] == 1
+        assert se["caught"] == 0
+        assert se["changed"] == 0
+
+    def test_summary_across_plans(self, store, sample_plan_record):
+        """Summary without plan_id aggregates across all plans."""
+        store.save_plan(sample_plan_record)
+        task = TaskRecord(plan_id=sample_plan_record.id, seq=1, title="T1")
+        store.save_task(task)
+
+        store.record_gate_outcome(sample_plan_record.id, task.id, "sibling_read",
+                                  caught_issue=True, changed_code=True)
+        store.record_gate_outcome(sample_plan_record.id, task.id, "sibling_read",
+                                  caught_issue=False, changed_code=False)
+
+        summary = store.get_gate_summary()  # No plan_id — all plans
+        sr = next(s for s in summary if s["gate"] == "sibling_read")
+        assert sr["fired"] == 2
+        assert sr["caught"] == 1
+
+    def test_empty_summary(self, store):
+        """Empty summary when no outcomes recorded."""
+        summary = store.get_gate_summary()
+        assert summary == []
+
+    def test_returns_outcome_id(self, store, sample_plan_record):
+        """record_gate_outcome returns the outcome ID."""
+        store.save_plan(sample_plan_record)
+        task = TaskRecord(plan_id=sample_plan_record.id, seq=1, title="T1")
+        store.save_task(task)
+
+        outcome_id = store.record_gate_outcome(
+            sample_plan_record.id, task.id, "fdmc_review",
+            caught_issue=True, detail="4 violations found"
+        )
+        assert outcome_id is not None
+        assert len(outcome_id) == 32  # hex UUID

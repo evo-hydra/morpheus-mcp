@@ -13,7 +13,7 @@ from morpheus_mcp.models.plan import PhaseRecord, PlanRecord, TaskRecord
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = "6"
+SCHEMA_VERSION = "7"
 
 _SCHEMA_SQL = """\
 CREATE TABLE IF NOT EXISTS morpheus_meta (
@@ -75,6 +75,20 @@ CREATE TABLE IF NOT EXISTS oil_changes (
     created_at      TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_oil_changes_plan ON oil_changes(plan_id);
+
+CREATE TABLE IF NOT EXISTS gate_outcomes (
+    id              TEXT PRIMARY KEY,
+    plan_id         TEXT NOT NULL,
+    task_id         TEXT NOT NULL,
+    gate            TEXT NOT NULL,
+    fired           INTEGER NOT NULL DEFAULT 1,
+    caught_issue    INTEGER NOT NULL DEFAULT 0,
+    changed_code    INTEGER NOT NULL DEFAULT 0,
+    detail          TEXT NOT NULL DEFAULT '',
+    created_at      TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_gate_outcomes_plan ON gate_outcomes(plan_id);
+CREATE INDEX IF NOT EXISTS idx_gate_outcomes_task ON gate_outcomes(task_id);
 """
 
 
@@ -245,6 +259,18 @@ class MorpheusStore:
             "5": (
                 "ALTER TABLE plans ADD COLUMN oil_change_due INTEGER NOT NULL DEFAULT 0;"
                 " UPDATE morpheus_meta SET value='6' WHERE key='schema_version';"
+            ),
+            "6": (
+                "CREATE TABLE IF NOT EXISTS gate_outcomes ("
+                "id TEXT PRIMARY KEY, plan_id TEXT NOT NULL, task_id TEXT NOT NULL, "
+                "gate TEXT NOT NULL, fired INTEGER NOT NULL DEFAULT 1, "
+                "caught_issue INTEGER NOT NULL DEFAULT 0, "
+                "changed_code INTEGER NOT NULL DEFAULT 0, "
+                "detail TEXT NOT NULL DEFAULT '', "
+                "created_at TEXT NOT NULL);"
+                " CREATE INDEX IF NOT EXISTS idx_gate_outcomes_plan ON gate_outcomes(plan_id);"
+                " CREATE INDEX IF NOT EXISTS idx_gate_outcomes_task ON gate_outcomes(task_id);"
+                " UPDATE morpheus_meta SET value='7' WHERE key='schema_version';"
             ),
         }
         current = from_version
@@ -551,3 +577,55 @@ class MorpheusStore:
             "commit_count": row[3],
             "created_at": row[4],
         }
+
+    # --- Gate Outcomes (Reflect) ---
+
+    def record_gate_outcome(
+        self,
+        plan_id: str,
+        task_id: str,
+        gate: str,
+        caught_issue: bool = False,
+        changed_code: bool = False,
+        detail: str = "",
+    ) -> str:
+        """Record whether a gate caught a real issue or was ceremony.
+
+        This is the Reflect step in the AWARE supervisor loop.
+        Over time, this data tells us which gates produce value
+        and which burn tokens without changing behavior.
+        """
+        outcome_id = uuid.uuid4().hex
+        self.conn.execute(
+            "INSERT INTO gate_outcomes "
+            "(id, plan_id, task_id, gate, fired, caught_issue, changed_code, detail, created_at) "
+            "VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?)",
+            (outcome_id, plan_id, task_id, gate,
+             int(caught_issue), int(changed_code), detail, _iso(datetime.now())),
+        )
+        self.conn.commit()
+        return outcome_id
+
+    def get_gate_summary(self, plan_id: str | None = None) -> list[dict]:
+        """Summarize gate outcomes: how often each gate fired, caught issues, changed code.
+
+        Returns one row per gate with counts. If plan_id is None, returns
+        across all plans (lifetime stats for the supervisor to learn from).
+        """
+        if plan_id:
+            cur = self.conn.execute(
+                "SELECT gate, COUNT(*) as fired, "
+                "SUM(caught_issue) as caught, SUM(changed_code) as changed "
+                "FROM gate_outcomes WHERE plan_id = ? GROUP BY gate ORDER BY fired DESC",
+                (plan_id,),
+            )
+        else:
+            cur = self.conn.execute(
+                "SELECT gate, COUNT(*) as fired, "
+                "SUM(caught_issue) as caught, SUM(changed_code) as changed "
+                "FROM gate_outcomes GROUP BY gate ORDER BY fired DESC",
+            )
+        return [
+            {"gate": r[0], "fired": r[1], "caught": r[2] or 0, "changed": r[3] or 0}
+            for r in cur.fetchall()
+        ]
