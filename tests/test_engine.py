@@ -859,3 +859,67 @@ class TestOilChangeEnforcement:
 
         result, _ = advance(store, task2.id, Phase.CHECK, {})
         assert result.passed is True
+
+
+class TestInlineReflect:
+    """Test that reflect_* fields in evidence auto-record gate outcomes."""
+
+    def test_inline_reflect_records_gate_outcome(self, store, sample_plan_record):
+        """reflect_* fields in evidence are extracted and stored as gate outcomes."""
+        store.save_plan(sample_plan_record)
+        task = TaskRecord(plan_id=sample_plan_record.id, seq=1, title="T1")
+        store.save_task(task)
+
+        advance(store, task.id, Phase.CHECK, {})
+
+        # Advance CODE with inline reflect data
+        evidence = {
+            "sibling_read": "src/parser.py",
+            "reflect_caught_issue": True,
+            "reflect_changed_code": True,
+            "reflect_detail": "matched singleton pattern from sibling",
+        }
+        result, _ = advance(store, task.id, Phase.CODE, evidence)
+        assert result.passed is True
+
+        # Verify gate outcome was recorded
+        summary = store.get_gate_summary(plan_id=sample_plan_record.id)
+        assert len(summary) == 1
+        assert summary[0]["gate"] == "sibling_read"
+        assert summary[0]["caught"] == 1
+        assert summary[0]["changed"] == 1
+
+    def test_inline_reflect_not_stored_in_evidence(self, store, sample_plan_record):
+        """reflect_* fields are popped from evidence — not persisted in phase record."""
+        store.save_plan(sample_plan_record)
+        task = TaskRecord(plan_id=sample_plan_record.id, seq=1, title="T1")
+        store.save_task(task)
+
+        advance(store, task.id, Phase.CHECK, {})
+
+        evidence = {
+            "sibling_read": "src/parser.py",
+            "reflect_caught_issue": False,
+            "reflect_detail": "no issues found",
+        }
+        advance(store, task.id, Phase.CODE, evidence)
+
+        phases = store.get_phases(task.id)
+        code_phase = [p for p in phases if p.phase == Phase.CODE][0]
+        import json
+        stored = json.loads(code_phase.evidence_json)
+        assert "reflect_caught_issue" not in stored
+        assert "reflect_detail" not in stored
+        assert "sibling_read" in stored
+
+    def test_no_reflect_fields_no_gate_outcome(self, store, sample_plan_record):
+        """Without reflect_* fields, no gate outcome is recorded."""
+        store.save_plan(sample_plan_record)
+        task = TaskRecord(plan_id=sample_plan_record.id, seq=1, title="T1")
+        store.save_task(task)
+
+        advance(store, task.id, Phase.CHECK, {})
+        advance(store, task.id, Phase.CODE, {"sibling_read": "x.py"})
+
+        summary = store.get_gate_summary(plan_id=sample_plan_record.id)
+        assert len(summary) == 0

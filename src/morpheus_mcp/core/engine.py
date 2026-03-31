@@ -50,6 +50,15 @@ GATE_EXAMPLES: dict[Phase, str] = {
 # Phase ordering for sequence validation
 _PHASE_ORDER = list(Phase)
 
+# Map phases to gate names for inline reflect recording
+_PHASE_TO_GATE: dict[Phase, str] = {
+    Phase.CODE: "sibling_read",
+    Phase.TEST: "build_verified",
+    Phase.GRADE: "fdmc_review",
+    Phase.COMMIT: "seraph_assess",
+    Phase.ADVANCE: "knowledge_gate",
+}
+
 
 @dataclass(frozen=True, slots=True)
 class GateResult:
@@ -369,6 +378,15 @@ def advance(
         store.save_phase(rejected)
         return result, None
 
+    # Extract inline reflect data before saving evidence.
+    # Agents can embed reflect_caught_issue, reflect_changed_code, and
+    # reflect_detail directly in the evidence dict instead of making a
+    # separate morpheus_reflect call. This is the primary path — the
+    # standalone reflect tool is kept as a fallback.
+    reflect_caught = evidence.pop("reflect_caught_issue", None)
+    reflect_changed = evidence.pop("reflect_changed_code", None)
+    reflect_detail = evidence.pop("reflect_detail", None)
+
     # Gate passed — record completion
     completed = PhaseRecord(
         task_id=full_id,
@@ -378,6 +396,18 @@ def advance(
         completed_at=datetime.now(timezone.utc),
     )
     store.save_phase(completed)
+
+    # Auto-record gate outcome if inline reflect data was provided.
+    if reflect_caught is not None and plan is not None:
+        gate_name = _PHASE_TO_GATE.get(phase, phase.value)
+        store.record_gate_outcome(
+            plan_id=plan.id,
+            task_id=full_id,
+            gate=gate_name,
+            caught_issue=bool(reflect_caught),
+            changed_code=bool(reflect_changed) if reflect_changed is not None else False,
+            detail=str(reflect_detail or ""),
+        )
 
     # Update task status based on phase progression
     if phase == Phase.CHECK:
