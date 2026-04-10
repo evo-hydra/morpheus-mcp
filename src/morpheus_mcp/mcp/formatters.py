@@ -110,20 +110,41 @@ def format_status(
     return "\n".join(lines)
 
 
-def format_advance_success(phase: Phase, task: TaskRecord) -> str:
-    """Format a successful phase advance."""
+def format_advance_success(
+    phase: Phase,
+    task: TaskRecord,
+    phase_order: list[Phase] | None = None,
+    extra_message: str = "",
+) -> str:
+    """Format a successful phase advance.
+
+    Args:
+        phase: The phase that just passed.
+        task: The task being advanced.
+        phase_order: Active phase order (standard or verify). Defaults to standard.
+        extra_message: Optional additional text (e.g., gate skip recommendations).
+    """
     size_note = f" [{task.size.value}]" if task.size != TaskSize.MEDIUM else ""
-    phase_idx = list(Phase).index(phase)
-    phases = list(Phase)
+    phases = phase_order if phase_order else list(Phase)
+
+    if phase in phases:
+        phase_idx = phases.index(phase)
+    else:
+        phase_idx = len(phases) - 1
+
+    suffix = ""
+    if extra_message:
+        suffix = f"\n\n{extra_message}"
+
     if phase_idx + 1 < len(phases):
         next_phase = phases[phase_idx + 1]
         return (
             f"**{phase.value}** gate passed for task {task.seq}.{size_note} {task.title}\n\n"
-            f"Next phase: **{next_phase.value}**"
+            f"Next phase: **{next_phase.value}**{suffix}"
         )
     return (
         f"**{phase.value}** gate passed for task {task.seq}.{size_note} {task.title}\n\n"
-        f"Task complete."
+        f"Task complete.{suffix}"
     )
 
 

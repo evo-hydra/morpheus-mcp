@@ -203,7 +203,20 @@ def create_server(config=None):
                 if task is None:
                     return f"Error: Task '{task_id}' not found after advance"
 
-                return format_advance_success(phase_enum, task)
+                # Resolve active phase order (verify mode uses streamlined path)
+                from morpheus_mcp.core.engine import _get_phase_order
+                active_phase_order = _get_phase_order(store, task.id)
+
+                # Pass through gate recommendations or other messages
+                extra = ""
+                if result.message and result.message != "Gate passed":
+                    extra = result.message
+
+                return format_advance_success(
+                    phase_enum, task,
+                    phase_order=active_phase_order,
+                    extra_message=extra,
+                )
         except (sqlite3.Error, OSError) as exc:
             return f"Error: {exc}"
 
