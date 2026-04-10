@@ -50,6 +50,9 @@ GATE_EXAMPLES: dict[Phase, str] = {
 # Phase ordering for sequence validation
 _PHASE_ORDER = list(Phase)
 
+# Verify mode: streamlined path for pre-implemented tasks (CHECK → TEST → ADVANCE)
+_VERIFY_PHASE_ORDER = [Phase.CHECK, Phase.TEST, Phase.ADVANCE]
+
 # Map phases to gate names for inline reflect recording
 _PHASE_TO_GATE: dict[Phase, str] = {
     Phase.CODE: "sibling_read",
@@ -58,6 +61,33 @@ _PHASE_TO_GATE: dict[Phase, str] = {
     Phase.COMMIT: "seraph_assess",
     Phase.ADVANCE: "knowledge_gate",
 }
+
+
+def _is_verify_mode(store: MorpheusStore, task_id: str) -> bool:
+    """Check if a task entered verify mode during CHECK.
+
+    A task is in verify mode when its CHECK phase was completed with
+    evidence containing ``"status": "pre_implemented"``. This switches
+    the task to a streamlined path: CHECK → TEST → ADVANCE, skipping
+    CODE, GRADE, and COMMIT gates entirely.
+    """
+    phases = store.get_phases(task_id)
+    for phase_rec in phases:
+        if phase_rec.phase == Phase.CHECK and phase_rec.status == PhaseStatus.COMPLETED:
+            try:
+                evidence = json.loads(phase_rec.evidence_json)
+            except (json.JSONDecodeError, TypeError):
+                evidence = {}
+            if evidence.get("status") == "pre_implemented":
+                return True
+    return False
+
+
+def _get_phase_order(store: MorpheusStore, task_id: str) -> list[Phase]:
+    """Return the phase ordering for a task — standard or verify."""
+    if _is_verify_mode(store, task_id):
+        return _VERIFY_PHASE_ORDER
+    return _PHASE_ORDER
 
 
 @dataclass(frozen=True, slots=True)
@@ -331,9 +361,21 @@ def advance(
                 ),
             ), None
 
-    # Enforce sequential phase ordering
+    # Enforce sequential phase ordering (verify mode uses streamlined path)
     if phase != Phase.CHECK:
-        prev_phase = _PHASE_ORDER[_PHASE_ORDER.index(phase) - 1]
+        phase_order = _get_phase_order(store, full_id)
+
+        # Reject phases not in the active path (e.g., CODE in verify mode)
+        if phase not in phase_order:
+            return GateResult(
+                passed=False,
+                message=(
+                    f"Phase {phase.value} is not valid in verify mode. "
+                    f"Pre-implemented tasks follow: CHECK → TEST → ADVANCE"
+                ),
+            ), None
+
+        prev_phase = phase_order[phase_order.index(phase) - 1]
         completed_phases = store.get_phases(full_id)
         prev_completed = any(
             p.phase == prev_phase and p.status == PhaseStatus.COMPLETED
@@ -447,6 +489,11 @@ def advance_batch(
         task_id = item.get("task_id", "")
         phase_str = item.get("phase", "")
         evidence = item.get("evidence", {})
+        if isinstance(evidence, str):
+            try:
+                evidence = json.loads(evidence)
+            except (json.JSONDecodeError, TypeError):
+                evidence = {}
 
         try:
             phase = Phase(phase_str.upper())

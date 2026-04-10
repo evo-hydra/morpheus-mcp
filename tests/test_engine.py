@@ -923,3 +923,137 @@ class TestInlineReflect:
 
         summary = store.get_gate_summary(plan_id=sample_plan_record.id)
         assert len(summary) == 0
+
+
+class TestVerifyMode:
+    """Tests for VERIFY mode — streamlined CHECK → TEST → ADVANCE for pre-implemented tasks."""
+
+    def _make_task(self, store, plan_id, **kwargs):
+        task = TaskRecord(plan_id=plan_id, seq=1, title="Pre-impl task", **kwargs)
+        store.save_task(task)
+        return task
+
+    def test_verify_mode_full_lifecycle(self, store, sample_plan_record):
+        """Pre-implemented task completes via CHECK → TEST → ADVANCE."""
+        store.save_plan(sample_plan_record)
+        task = self._make_task(store, sample_plan_record.id)
+
+        # CHECK with pre_implemented evidence
+        result, _ = advance(store, task.id, Phase.CHECK, {
+            "status": "pre_implemented",
+            "files_confirmed": ["src/foo.py"],
+        })
+        assert result.passed is True
+
+        # TEST directly (skipping CODE)
+        result, _ = advance(store, task.id, Phase.TEST, {
+            "build_verified": "python -m py_compile src/foo.py — OK",
+        })
+        assert result.passed is True
+
+        # ADVANCE directly (skipping GRADE and COMMIT)
+        result, _ = advance(store, task.id, Phase.ADVANCE, {
+            "knowledge_gate": "true",
+        })
+        assert result.passed is True
+
+        retrieved = store.get_task(task.id)
+        assert retrieved.status == TaskStatus.DONE
+
+    def test_verify_mode_rejects_code_phase(self, store, sample_plan_record):
+        """CODE phase is rejected in verify mode."""
+        store.save_plan(sample_plan_record)
+        task = self._make_task(store, sample_plan_record.id)
+
+        advance(store, task.id, Phase.CHECK, {
+            "status": "pre_implemented",
+            "files_confirmed": ["src/foo.py"],
+        })
+
+        result, phase = advance(store, task.id, Phase.CODE, {"sibling_read": "x.py"})
+        assert result.passed is False
+        assert "not valid in verify mode" in result.message
+        assert phase is None
+
+    def test_verify_mode_rejects_grade_phase(self, store, sample_plan_record):
+        """GRADE phase is rejected in verify mode."""
+        store.save_plan(sample_plan_record)
+        task = self._make_task(store, sample_plan_record.id)
+
+        advance(store, task.id, Phase.CHECK, {
+            "status": "pre_implemented",
+            "files_confirmed": ["src/foo.py"],
+        })
+        advance(store, task.id, Phase.TEST, {"build_verified": "ok"})
+
+        result, _ = advance(store, task.id, Phase.GRADE, _grade_evidence())
+        assert result.passed is False
+        assert "not valid in verify mode" in result.message
+
+    def test_verify_mode_rejects_commit_phase(self, store, sample_plan_record):
+        """COMMIT phase is rejected in verify mode."""
+        store.save_plan(sample_plan_record)
+        task = self._make_task(store, sample_plan_record.id)
+
+        advance(store, task.id, Phase.CHECK, {
+            "status": "pre_implemented",
+            "files_confirmed": ["src/foo.py"],
+        })
+        advance(store, task.id, Phase.TEST, {"build_verified": "ok"})
+
+        result, _ = advance(store, task.id, Phase.COMMIT, {"seraph_id": "abc"})
+        assert result.passed is False
+        assert "not valid in verify mode" in result.message
+
+    def test_verify_mode_still_requires_test_evidence(self, store, sample_plan_record):
+        """TEST gate still enforces build_verified in verify mode."""
+        store.save_plan(sample_plan_record)
+        task = self._make_task(store, sample_plan_record.id)
+
+        advance(store, task.id, Phase.CHECK, {
+            "status": "pre_implemented",
+            "files_confirmed": ["src/foo.py"],
+        })
+
+        result, _ = advance(store, task.id, Phase.TEST, {})
+        assert result.passed is False
+        assert "build_verified" in result.message
+
+    def test_normal_task_unaffected(self, store, sample_plan_record):
+        """Tasks without pre_implemented evidence still use standard path."""
+        store.save_plan(sample_plan_record)
+        task = self._make_task(store, sample_plan_record.id)
+
+        # CHECK without pre_implemented
+        advance(store, task.id, Phase.CHECK, {})
+
+        # CODE is required (standard path)
+        result, _ = advance(store, task.id, Phase.TEST, {"build_verified": "ok"})
+        assert result.passed is False
+        assert "CODE not completed" in result.message
+
+    def test_verify_mode_mixed_plan(self, store, sample_plan_record):
+        """Plan with one pre-implemented task and one normal task."""
+        store.save_plan(sample_plan_record)
+
+        # Task 1: pre-implemented (verify path)
+        t1 = TaskRecord(plan_id=sample_plan_record.id, seq=1, title="Pre-impl")
+        store.save_task(t1)
+
+        # Task 2: normal (standard path)
+        t2 = TaskRecord(plan_id=sample_plan_record.id, seq=2, title="Normal")
+        store.save_task(t2)
+
+        # Task 1: verify path (CHECK → TEST → ADVANCE)
+        advance(store, t1.id, Phase.CHECK, {
+            "status": "pre_implemented",
+            "files_confirmed": ["src/foo.py"],
+        })
+        advance(store, t1.id, Phase.TEST, {"build_verified": "ok"})
+        r1, _ = advance(store, t1.id, Phase.ADVANCE, {"knowledge_gate": "true"})
+        assert r1.passed is True
+
+        # Task 2: standard path (CHECK → CODE → TEST → ...)
+        advance(store, t2.id, Phase.CHECK, {})
+        r2, _ = advance(store, t2.id, Phase.CODE, _code_evidence())
+        assert r2.passed is True
