@@ -207,7 +207,7 @@ def create_server(config=None):
         except (sqlite3.Error, OSError) as exc:
             return f"Error: {exc}"
 
-    @mcp.tool()
+    # Internal function — use multiple morpheus_advance calls instead (v4 surface collapse)
     def morpheus_advance_batch(advances: str) -> str:
         """Advance multiple tasks through phase gates in a single call.
 
@@ -244,7 +244,7 @@ def create_server(config=None):
         except (sqlite3.Error, OSError) as exc:
             return f"Error: {exc}"
 
-    @mcp.tool()
+    # Internal function — progress logging is optional (v4 surface collapse)
     def morpheus_progress(task_id: str, message: str) -> str:
         """Log progress for a task without advancing phases.
 
@@ -324,7 +324,7 @@ def create_server(config=None):
         except (sqlite3.Error, OSError) as exc:
             return f"Error: {exc}"
 
-    @mcp.tool()
+    # Internal function — merged into morpheus_advance via inline reflect fields (v4 surface collapse)
     def morpheus_reflect(
         plan_id: str,
         task_id: str,
@@ -395,7 +395,7 @@ def create_server(config=None):
         except (sqlite3.Error, OSError) as exc:
             return f"Error: {exc}"
 
-    @mcp.tool()
+    # Internal function — diagnostic only (v4 surface collapse)
     def morpheus_version() -> str:
         """Return Morpheus server version, plan schema version, and Python version.
 
