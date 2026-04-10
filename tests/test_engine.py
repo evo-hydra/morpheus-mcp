@@ -23,7 +23,7 @@ def _code_evidence(sibling: str = "sibling.py") -> dict:
     return {"sibling_read": sibling}
 
 
-def _grade_evidence(tests: str = "12 passed", fdmc: str = "Consistent — matched pattern") -> dict:
+def _grade_evidence(tests: str = "12 passed", fdmc: str = "Consistent — re-read engine.py, matched pattern") -> dict:
     """Build valid GRADE phase evidence."""
     return {"tests_passed": tests, "fdmc_review": fdmc}
 
@@ -299,7 +299,7 @@ class TestNoTestCommand:
 
     def test_none_skips_tests_passed(self):
         """test_command=none skips tests_passed in GRADE phase."""
-        r = validate_evidence(Phase.GRADE, {"fdmc_review": "Consistent"}, test_command="none")
+        r = validate_evidence(Phase.GRADE, {"fdmc_review": "Consistent — read config.py, no issues"}, test_command="none")
         assert r.passed is True
 
     def test_none_case_insensitive(self):
@@ -340,7 +340,7 @@ class TestNoTestCommand:
         advance(store, task.id, Phase.CODE, {"sibling_read": "config.yaml"})
         r_test, _ = advance(store, task.id, Phase.TEST, {})  # no build_verified
         assert r_test.passed is True
-        r_grade, _ = advance(store, task.id, Phase.GRADE, {"fdmc_review": "Consistent"})  # no tests_passed
+        r_grade, _ = advance(store, task.id, Phase.GRADE, {"fdmc_review": "Consistent — read config.yaml, no issues"})  # no tests_passed
         assert r_grade.passed is True
         advance(store, task.id, Phase.COMMIT, {"seraph_id": "abc"})
         advance(store, task.id, Phase.ADVANCE, {"knowledge_gate": "true"})
@@ -469,7 +469,7 @@ class TestAdvance:
         advance(store, task.id, Phase.TEST, {"build_verified": "ok"})
         advance(store, task.id, Phase.GRADE, _grade_evidence())
         advance(store, task.id, Phase.COMMIT, {"seraph_id": "abc123"})
-        advance(store, task.id, Phase.ADVANCE, {"knowledge_gate": "nothing_surprised", "knowledge_reason": "followed established pattern"})
+        advance(store, task.id, Phase.ADVANCE, {"knowledge_gate": "nothing_surprised", "knowledge_reason": "followed established pattern from prior task — no novel patterns discovered"})
 
         retrieved = store.get_task(task.id)
         assert retrieved.status == TaskStatus.DONE
@@ -604,7 +604,7 @@ class TestAdaptiveKnowledgeGate:
         """Small plans still accept knowledge_gate if provided."""
         r = validate_evidence(
             Phase.ADVANCE,
-            {"knowledge_gate": "nothing_surprised", "knowledge_reason": "simple change"},
+            {"knowledge_gate": "nothing_surprised", "knowledge_reason": "simple config change with no interactions or novel patterns"},
             task_count=3, knowledge_gate_task_threshold=5,
         )
         assert r.passed is True
@@ -630,8 +630,8 @@ class TestAdaptiveKnowledgeGate:
         # Walk through all phases
         advance(store, task.id, Phase.CHECK, {})
         advance(store, task.id, Phase.CODE, {"sibling_read": "test.py"})
-        advance(store, task.id, Phase.TEST, {"build_verified": "ok"})
-        advance(store, task.id, Phase.GRADE, {"tests_passed": "ok", "fdmc_review": "ok"})
+        advance(store, task.id, Phase.TEST, {"build_verified": "cmake build ok"})
+        advance(store, task.id, Phase.GRADE, _grade_evidence())
         advance(store, task.id, Phase.COMMIT, {"seraph_id": "abc123"})
         # ADVANCE without knowledge_gate — plan has 3 tasks < threshold 5
         result, _ = advance(store, task.id, Phase.ADVANCE, {})
@@ -674,8 +674,8 @@ class TestSkipReason:
         # Walk to COMMIT phase
         advance(store, task.id, Phase.CHECK, {})
         advance(store, task.id, Phase.CODE, {"sibling_read": "test.py"})
-        advance(store, task.id, Phase.TEST, {"build_verified": "ok"})
-        advance(store, task.id, Phase.GRADE, {"tests_passed": "ok", "fdmc_review": "ok"})
+        advance(store, task.id, Phase.TEST, {"build_verified": "cmake build ok"})
+        advance(store, task.id, Phase.GRADE, _grade_evidence())
 
         # COMMIT with skip_reason instead of seraph_id
         result, phase_record = advance(
@@ -1057,3 +1057,187 @@ class TestVerifyMode:
         advance(store, t2.id, Phase.CHECK, {})
         r2, _ = advance(store, t2.id, Phase.CODE, _code_evidence())
         assert r2.passed is True
+
+
+class TestEvidenceHardening:
+    """Tests for evidence content quality validation (anti-fabrication)."""
+
+    # --- tests_passed ---
+
+    def test_rejects_bare_yes(self):
+        """tests_passed='yes' is rejected as a bare assertion."""
+        r = validate_evidence(Phase.GRADE, {"tests_passed": "yes", "fdmc_review": "Consistent — read foo.py"})
+        assert r.passed is False
+        assert "bare assertion" in r.message
+
+    def test_rejects_bare_true(self):
+        """tests_passed='true' is rejected."""
+        r = validate_evidence(Phase.GRADE, {"tests_passed": "true", "fdmc_review": "Consistent — read foo.py"})
+        assert r.passed is False
+        assert "bare assertion" in r.message
+
+    def test_rejects_bare_ok(self):
+        """tests_passed='ok' is rejected."""
+        r = validate_evidence(Phase.GRADE, {"tests_passed": "ok", "fdmc_review": "Consistent — read foo.py"})
+        assert r.passed is False
+        assert "bare assertion" in r.message
+
+    def test_rejects_no_test_pattern(self):
+        """tests_passed without recognizable test output is rejected."""
+        r = validate_evidence(Phase.GRADE, {
+            "tests_passed": "everything looks good",
+            "fdmc_review": "Consistent — read foo.py",
+        })
+        assert r.passed is False
+        assert "recognizable test output" in r.message
+
+    def test_accepts_numeric_output(self):
+        """tests_passed with numeric counts is accepted."""
+        r = validate_evidence(Phase.GRADE, {
+            "tests_passed": "38/38 passed",
+            "fdmc_review": "Consistent — read foo.py, no issues",
+        })
+        assert r.passed is True
+
+    def test_accepts_pytest_output(self):
+        """tests_passed with pytest runner name is accepted."""
+        r = validate_evidence(Phase.GRADE, {
+            "tests_passed": "223 passed (pytest)",
+            "fdmc_review": "Consistent — read engine.py, matched pattern",
+        })
+        assert r.passed is True
+
+    def test_accepts_vitest_output(self):
+        """tests_passed with vitest runner name is accepted."""
+        r = validate_evidence(Phase.GRADE, {
+            "tests_passed": "12 tests passed (vitest)",
+            "fdmc_review": "Consistent — read foo.ts, ok",
+        })
+        assert r.passed is True
+
+    def test_skipped_evidence_bypasses_check(self):
+        """Skipped tests_passed bypasses content check."""
+        r = validate_evidence(Phase.GRADE, {
+            "tests_passed": "skipped: no test command",
+            "fdmc_review": "skipped: small task",
+        })
+        assert r.passed is True
+
+    def test_small_task_skips_content_check(self):
+        """SMALL tasks skip content quality checks."""
+        r = validate_evidence(Phase.GRADE, {
+            "tests_passed": "ok",
+        }, task_size=TaskSize.SMALL)
+        assert r.passed is True
+
+    # --- fdmc_review ---
+
+    def test_fdmc_rejects_bare_ok(self):
+        """fdmc_review='ok' is rejected."""
+        r = validate_evidence(Phase.GRADE, {
+            "tests_passed": "12 passed (pytest)",
+            "fdmc_review": "ok",
+        })
+        assert r.passed is False
+        assert "bare assertion" in r.message
+
+    def test_fdmc_rejects_no_lens(self):
+        """fdmc_review without a lens name is rejected."""
+        r = validate_evidence(Phase.GRADE, {
+            "tests_passed": "12 passed (pytest)",
+            "fdmc_review": "reviewed the code and it looks good",
+        })
+        assert r.passed is False
+        assert "FDMC lens" in r.message
+
+    def test_fdmc_rejects_no_file(self):
+        """fdmc_review with lens but no file reference is rejected."""
+        r = validate_evidence(Phase.GRADE, {
+            "tests_passed": "12 passed (pytest)",
+            "fdmc_review": "Consistent — matched existing pattern",
+        })
+        assert r.passed is False
+        assert "file" in r.message.lower()
+
+    def test_fdmc_accepts_valid(self):
+        """fdmc_review with lens + file is accepted."""
+        r = validate_evidence(Phase.GRADE, {
+            "tests_passed": "12 passed (pytest)",
+            "fdmc_review": "Consistent — re-read auth.ts, matched UserService pattern",
+        })
+        assert r.passed is True
+
+    def test_fdmc_accepts_path_with_slash(self):
+        """fdmc_review with path containing / is accepted."""
+        r = validate_evidence(Phase.GRADE, {
+            "tests_passed": "12 passed (pytest)",
+            "fdmc_review": "Future-Proof — re-read src/core/engine, made config optional",
+        })
+        assert r.passed is True
+
+    # --- knowledge_reason length ---
+
+    def test_knowledge_reason_too_short(self):
+        """knowledge_reason under 20 chars is rejected."""
+        r = validate_evidence(Phase.ADVANCE, {
+            "knowledge_gate": "nothing_surprised",
+            "knowledge_reason": "simple task",
+        })
+        assert r.passed is False
+        assert "too short" in r.message
+
+    def test_knowledge_reason_adequate(self):
+        """knowledge_reason at 20+ chars is accepted."""
+        r = validate_evidence(Phase.ADVANCE, {
+            "knowledge_gate": "nothing_surprised",
+            "knowledge_reason": "task was a config addition with no interactions",
+        })
+        assert r.passed is True
+
+    # --- sibling_read content (via advance) ---
+
+    def test_sibling_read_rejects_target_file(self, store, sample_plan_record):
+        """sibling_read pointing to a task target file is rejected."""
+        store.save_plan(sample_plan_record)
+        task = TaskRecord(
+            plan_id=sample_plan_record.id, seq=1, title="T1",
+            files_json='["src/engine.py"]',
+        )
+        store.save_task(task)
+
+        advance(store, task.id, Phase.CHECK, {})
+        result, phase = advance(store, task.id, Phase.CODE, {
+            "sibling_read": "src/engine.py",
+        })
+        assert result.passed is False
+        assert "target file" in result.message.lower()
+        assert phase is None
+
+    def test_sibling_read_accepts_different_file(self, store, sample_plan_record):
+        """sibling_read pointing to a non-target file is accepted."""
+        store.save_plan(sample_plan_record)
+        task = TaskRecord(
+            plan_id=sample_plan_record.id, seq=1, title="T1",
+            files_json='["src/engine.py"]',
+        )
+        store.save_task(task)
+
+        advance(store, task.id, Phase.CHECK, {})
+        result, _ = advance(store, task.id, Phase.CODE, {
+            "sibling_read": "src/parser.py",
+        })
+        assert result.passed is True
+
+    def test_sibling_read_rejects_bare_assertion(self, store, sample_plan_record):
+        """sibling_read='yes' is rejected via advance."""
+        store.save_plan(sample_plan_record)
+        task = TaskRecord(
+            plan_id=sample_plan_record.id, seq=1, title="T1",
+            files_json='["src/foo.py"]',
+        )
+        store.save_task(task)
+
+        advance(store, task.id, Phase.CHECK, {})
+        result, _ = advance(store, task.id, Phase.CODE, {"sibling_read": "yes"})
+        assert result.passed is False
+        assert "bare assertion" in result.message

@@ -41,7 +41,7 @@ def _code_ev(sibling: str = "merovingian/src/config.py") -> dict:
     return {"sibling_read": sibling}
 
 
-def _grade_ev(tests: str = "12 passed", fdmc: str = "Consistent — matched") -> dict:
+def _grade_ev(tests: str = "12 passed", fdmc: str = "Consistent — re-read config.py, matched pattern") -> dict:
     return {"tests_passed": tests, "fdmc_review": fdmc}
 
 
@@ -92,7 +92,7 @@ def test_full_lifecycle(tmp_path, integration_plan):
 
         # Phase: ADVANCE (requires knowledge_gate)
         result, phase = advance(
-            store, task1.id, Phase.ADVANCE, {"knowledge_gate": "nothing_surprised", "knowledge_reason": "followed established pattern"}
+            store, task1.id, Phase.ADVANCE, {"knowledge_gate": "nothing_surprised", "knowledge_reason": "followed established pattern from prior task — no novel patterns"}
         )
         assert result.passed is True
 
@@ -112,7 +112,7 @@ def test_full_lifecycle(tmp_path, integration_plan):
         advance(store, task2.id, Phase.TEST, {"build_verified": "ok"})
         advance(store, task2.id, Phase.GRADE, _grade_ev())
         advance(store, task2.id, Phase.COMMIT, {"seraph_id": "def789"})
-        advance(store, task2.id, Phase.ADVANCE, {"knowledge_gate": "nothing_surprised", "knowledge_reason": "followed established pattern"})
+        advance(store, task2.id, Phase.ADVANCE, {"knowledge_gate": "nothing_surprised", "knowledge_reason": "followed established pattern from prior task — no novel patterns"})
 
         # No more pending tasks
         assert store.get_next_pending_task(plan_id) is None
@@ -180,7 +180,7 @@ def test_grade_disabled_plan(tmp_path):
         advance(store, task.id, Phase.CHECK, {})
         advance(store, task.id, Phase.CODE, _code_ev())
         advance(store, task.id, Phase.TEST, {"build_verified": "ok"})
-        advance(store, task.id, Phase.GRADE, _grade_ev("ok", "Consistent — ok"))
+        advance(store, task.id, Phase.GRADE, _grade_ev("1 passed", "Consistent — re-read config.toml, no issues"))
 
         # COMMIT without seraph_id — should pass because grade=false
         result, _ = advance(store, task.id, Phase.COMMIT, {})
@@ -257,8 +257,8 @@ def test_new_features_integration(tmp_path):
         entries = store.get_progress(t2.id)
         assert len(entries) == 1
 
-        advance(store, t2.id, Phase.TEST, {"build_verified": "ok"})
-        advance(store, t2.id, Phase.GRADE, _grade_ev())
+        advance(store, t2.id, Phase.TEST, {"build_verified": "python3 -c 'import core' — OK"})
+        advance(store, t2.id, Phase.GRADE, _grade_ev("5 passed", "Consistent — re-read config.py, matched greenfield pattern"))
         advance(store, t2.id, Phase.COMMIT, {"seraph_id": "abc123"})
         advance(store, t2.id, Phase.ADVANCE, {"knowledge_gate": "true"})
 
@@ -269,14 +269,14 @@ def test_new_features_integration(tmp_path):
         # CODE: greenfield still means no sibling_read
         result, _ = advance(store, t3.id, Phase.CODE, {})
         assert result.passed is True
-        advance(store, t3.id, Phase.TEST, {"build_verified": "ok"})
-        advance(store, t3.id, Phase.GRADE, _grade_ev())
+        advance(store, t3.id, Phase.TEST, {"build_verified": "python3 -c 'import api' — OK"})
+        advance(store, t3.id, Phase.GRADE, _grade_ev("8 passed", "Consistent — re-read core.py, matched greenfield pattern"))
         # COMMIT: LARGE requires seraph_id even though we could try without
         result, _ = advance(store, t3.id, Phase.COMMIT, {})
         assert result.passed is False  # LARGE always requires seraph
         result, _ = advance(store, t3.id, Phase.COMMIT, {"seraph_id": "def456"})
         assert result.passed is True
-        advance(store, t3.id, Phase.ADVANCE, {"knowledge_gate": "nothing_surprised", "knowledge_reason": "followed established pattern"})
+        advance(store, t3.id, Phase.ADVANCE, {"knowledge_gate": "nothing_surprised", "knowledge_reason": "followed established pattern from prior task — no novel patterns"})
 
         assert store.get_task(t3.id).status == TaskStatus.DONE
 
@@ -345,8 +345,8 @@ def test_invalid_size_lifecycle(tmp_path):
         # Greenfield mode relaxes sibling_read for MEDIUM
         result, _ = advance(store, t2.id, Phase.CODE, {})
         assert result.passed is True
-        advance(store, t2.id, Phase.TEST, {"build_verified": "ok"})
-        advance(store, t2.id, Phase.GRADE, {"tests_passed": "ok", "fdmc_review": "ok"})
+        advance(store, t2.id, Phase.TEST, {"build_verified": "python3 -c 'import b' — OK"})
+        advance(store, t2.id, Phase.GRADE, _grade_ev())
         advance(store, t2.id, Phase.COMMIT, {"seraph_id": "abc"})
         advance(store, t2.id, Phase.ADVANCE, {"knowledge_gate": "true"})
         assert store.get_task(t2.id).status == TaskStatus.DONE
@@ -450,7 +450,7 @@ def test_medium_no_test_command_lifecycle(tmp_path):
         result, _ = advance(store, task.id, Phase.GRADE, {})
         assert result.passed is False
         assert "fdmc_review" in result.message
-        result, _ = advance(store, task.id, Phase.GRADE, {"fdmc_review": "Consistent — matched"})
+        result, _ = advance(store, task.id, Phase.GRADE, {"fdmc_review": "Consistent — re-read system.md, matches prompts/old.md pattern"})
         assert result.passed is True
 
         # COMMIT: MEDIUM still requires seraph_id
@@ -535,8 +535,8 @@ def test_oil_change_lifecycle(tmp_path):
 
         # Complete t1
         advance(store, t1.id, Phase.CODE, {"sibling_read": "setup.py"})
-        advance(store, t1.id, Phase.TEST, {"build_verified": "ok"})
-        advance(store, t1.id, Phase.GRADE, {"tests_passed": "ok", "fdmc_review": "ok"})
+        advance(store, t1.id, Phase.TEST, {"build_verified": "python3 -c 'import a' — OK"})
+        advance(store, t1.id, Phase.GRADE, _grade_ev("3 passed", "Consistent — re-read setup.py, matched pattern"))
         advance(store, t1.id, Phase.COMMIT, {"seraph_id": "abc"})
         advance(store, t1.id, Phase.ADVANCE, {"knowledge_gate": "true"})
         assert store.get_task(t1.id).status == TaskStatus.DONE
@@ -551,8 +551,8 @@ def test_oil_change_lifecycle(tmp_path):
 
         # Complete t2 and close
         advance(store, t2.id, Phase.CODE, {"sibling_read": "src/a.py"})
-        advance(store, t2.id, Phase.TEST, {"build_verified": "ok"})
-        advance(store, t2.id, Phase.GRADE, {"tests_passed": "ok", "fdmc_review": "ok"})
+        advance(store, t2.id, Phase.TEST, {"build_verified": "python3 -c 'import b' — OK"})
+        advance(store, t2.id, Phase.GRADE, _grade_ev("3 passed", "Consistent — re-read src/a.py, matched pattern"))
         advance(store, t2.id, Phase.COMMIT, {"seraph_id": "def"})
         advance(store, t2.id, Phase.ADVANCE, {"knowledge_gate": "true"})
 

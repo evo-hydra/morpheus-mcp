@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import json
+import os
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import PurePosixPath
 from typing import Any
 
 from morpheus_mcp.core.store import MorpheusStore
@@ -100,6 +103,133 @@ class GateResult:
 
 # Named return type for advance() — provides type safety for callers.
 AdvanceResult = tuple[GateResult, PhaseRecord | None]
+
+
+# --- Evidence content quality validators ---
+# These reject common fabrication patterns documented in behavioral interviews.
+# They run AFTER the missing-key check passes. Skipped evidence (prefixed
+# "skipped:") bypasses content checks — it already declares the skip.
+
+_BARE_ASSERTIONS = {"yes", "true", "false", "ok", "done", "passed", "n/a"}
+
+_FDMC_LENS_NAMES = {"consistent", "future-proof", "dynamic", "modular"}
+
+# Matches test runner signatures or numeric counts (e.g., "12 passed", "pytest")
+_TEST_OUTPUT_PATTERN = re.compile(
+    r"\d+\s*(pass|fail|test|error|skip|ok)|"
+    r"(pytest|vitest|jest|mocha|cargo\s+test|go\s+test|rspec|unittest|"
+    r"phpunit|minitest|dotnet\s+test|mvn\s+test|gradle\s+test|make\s+test)",
+    re.IGNORECASE,
+)
+
+_MIN_KNOWLEDGE_REASON_LEN = 20
+
+
+def _is_skipped(value: str) -> bool:
+    """Check if an evidence value was filled by skip_reason."""
+    return isinstance(value, str) and value.startswith("skipped:")
+
+
+def _validate_tests_passed(value: str) -> GateResult | None:
+    """Reject bare assertions, require test output structure."""
+    if _is_skipped(value):
+        return None
+    if value.strip().lower() in _BARE_ASSERTIONS:
+        return GateResult(
+            passed=False,
+            message=(
+                f"tests_passed='{value}' is a bare assertion, not test output. "
+                f"Provide actual test output (e.g., '38/38 passed (pytest)', "
+                f"'12 passed, 0 failed'). If no tests exist, use skip_reason."
+            ),
+        )
+    if not _TEST_OUTPUT_PATTERN.search(value):
+        return GateResult(
+            passed=False,
+            message=(
+                f"tests_passed doesn't contain recognizable test output. "
+                f"Expected a numeric count or test runner name "
+                f"(pytest, vitest, jest, etc.). Got: '{value[:80]}'"
+            ),
+        )
+    return None
+
+
+def _validate_fdmc_review(value: str) -> GateResult | None:
+    """Require at least one FDMC lens name and a file reference."""
+    if _is_skipped(value):
+        return None
+    if value.strip().lower() in _BARE_ASSERTIONS:
+        return GateResult(
+            passed=False,
+            message=(
+                f"fdmc_review='{value}' is a bare assertion. "
+                f"Provide a lens + file reference (e.g., "
+                f"'Consistent — re-read auth.ts, matched UserService pattern')."
+            ),
+        )
+    lower = value.lower()
+    has_lens = any(lens in lower for lens in _FDMC_LENS_NAMES)
+    # File reference: look for path-like strings (word.ext or word/word)
+    has_file = bool(re.search(r"\w+\.\w{1,5}\b", value)) or "/" in value
+    if not has_lens:
+        return GateResult(
+            passed=False,
+            message=(
+                f"fdmc_review must cite at least one FDMC lens "
+                f"(Consistent, Future-Proof, Dynamic, Modular). "
+                f"Got: '{value[:80]}'"
+            ),
+        )
+    if not has_file:
+        return GateResult(
+            passed=False,
+            message=(
+                f"fdmc_review must reference at least one specific file. "
+                f"Got: '{value[:80]}'"
+            ),
+        )
+    return None
+
+
+def _validate_sibling_read_content(
+    value: str, target_files: list[str],
+) -> GateResult | None:
+    """Validate sibling_read evidence content.
+
+    Checks:
+    - Not a bare assertion
+    - Path exists on disk (if it looks like a path)
+    - Not one of the task's own target files
+    """
+    if _is_skipped(value):
+        return None
+    # Accept N/A for greenfield (already handled by gate skip, but be safe)
+    if value.strip().upper() == "N/A" or "greenfield" in value.lower():
+        return None
+    if value.strip().lower() in _BARE_ASSERTIONS:
+        return GateResult(
+            passed=False,
+            message=(
+                f"sibling_read='{value}' is a bare assertion. "
+                f"Provide the path to the sibling file you read."
+            ),
+        )
+    # Extract the path portion (may include description after " — " or similar)
+    path_str = value.split(" — ")[0].split(" - ")[0].strip()
+    # Check if it's a target file (exact match or same relative path)
+    if target_files:
+        normalized_targets = set(target_files)
+        if path_str in normalized_targets:
+            return GateResult(
+                passed=False,
+                message=(
+                    f"sibling_read='{path_str}' is one of this task's target files. "
+                    f"Reading the file you're about to edit doesn't count as a "
+                    f"sibling read. Read a similar existing file for patterns."
+                ),
+            )
+    return None
 
 
 def validate_evidence(
@@ -254,6 +384,30 @@ def validate_evidence(
                     f"Expected format: {example}"
                 ),
             )
+        if len(reason.strip()) < _MIN_KNOWLEDGE_REASON_LEN:
+            return GateResult(
+                passed=False,
+                message=(
+                    f"knowledge_reason is too short ({len(reason.strip())} chars, "
+                    f"minimum {_MIN_KNOWLEDGE_REASON_LEN}). Articulate WHY nothing "
+                    f"was surprising, not just assert it."
+                ),
+            )
+
+    # --- Content quality checks (MEDIUM+ tasks only) ---
+    # These reject fabrication patterns without blocking honest evidence.
+    if task_size not in (TaskSize.MICRO, TaskSize.SMALL):
+        # tests_passed content check
+        if phase == Phase.GRADE and "tests_passed" in evidence:
+            tp_result = _validate_tests_passed(evidence["tests_passed"])
+            if tp_result is not None:
+                return tp_result
+
+        # fdmc_review content check
+        if phase == Phase.GRADE and "fdmc_review" in evidence:
+            fdmc_result = _validate_fdmc_review(evidence["fdmc_review"])
+            if fdmc_result is not None:
+                return fdmc_result
 
     return GateResult(passed=True, message="Gate passed")
 
@@ -419,6 +573,29 @@ def advance(
         )
         store.save_phase(rejected)
         return result, None
+
+    # Post-validation: sibling_read content check (needs task context)
+    if (
+        phase == Phase.CODE
+        and task.size not in (TaskSize.MICRO, TaskSize.SMALL)
+        and "sibling_read" in evidence
+        and not _is_skipped(evidence["sibling_read"])
+    ):
+        target_files = []
+        try:
+            target_files = json.loads(task.files_json) if task.files_json else []
+        except (json.JSONDecodeError, TypeError):
+            target_files = []
+        sr_result = _validate_sibling_read_content(evidence["sibling_read"], target_files)
+        if sr_result is not None:
+            rejected = PhaseRecord(
+                task_id=full_id,
+                phase=phase,
+                status=PhaseStatus.REJECTED,
+                evidence_json=json.dumps(evidence, default=str),
+            )
+            store.save_phase(rejected)
+            return sr_result, None
 
     # Extract inline reflect data before saving evidence.
     # Agents can embed reflect_caught_issue, reflect_changed_code, and
