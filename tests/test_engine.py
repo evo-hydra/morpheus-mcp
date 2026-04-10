@@ -12,6 +12,7 @@ from morpheus_mcp.core.engine import (
     check_oil_change_advisory,
     close_plan,
     init_plan,
+    recommend_gates,
     validate_evidence,
 )
 from morpheus_mcp.models.enums import Phase, PhaseStatus, PlanStatus, TaskSize, TaskStatus
@@ -1241,3 +1242,79 @@ class TestEvidenceHardening:
         result, _ = advance(store, task.id, Phase.CODE, {"sibling_read": "yes"})
         assert result.passed is False
         assert "bare assertion" in result.message
+
+
+class TestRecommendGates:
+    """Tests for Dynamic Weigh — gate skip recommendations based on historical data."""
+
+    def test_no_data_returns_empty(self, store):
+        """No gate outcomes means no recommendations."""
+        assert recommend_gates(store) == []
+
+    def test_below_min_samples_returns_empty(self, store, sample_plan_record):
+        """Gates with fewer than min_samples aren't recommended for skip."""
+        store.save_plan(sample_plan_record)
+        # Record 5 outcomes (below default min_samples=20)
+        for i in range(5):
+            store.record_gate_outcome(
+                sample_plan_record.id, f"task_{i}", "sibling_read",
+                caught_issue=False, changed_code=False, detail="noop",
+            )
+        assert recommend_gates(store) == []
+
+    def test_low_hit_rate_recommends_skip(self, store, sample_plan_record):
+        """Gates with <10% hit rate over 20+ samples are recommended for skip."""
+        store.save_plan(sample_plan_record)
+        # Record 25 outcomes, only 1 caught (4% hit rate)
+        for i in range(25):
+            store.record_gate_outcome(
+                sample_plan_record.id, f"task_{i}", "seraph_assess",
+                caught_issue=(i == 0), changed_code=False, detail="test",
+            )
+        recs = recommend_gates(store, min_samples=20, threshold=0.10)
+        assert len(recs) == 1
+        assert recs[0]["gate"] == "seraph_assess"
+        assert "skip" in recs[0]["recommendation"]
+
+    def test_high_hit_rate_not_recommended(self, store, sample_plan_record):
+        """Gates with >10% hit rate are not recommended for skip."""
+        store.save_plan(sample_plan_record)
+        # Record 20 outcomes, 5 caught (25% hit rate)
+        for i in range(20):
+            store.record_gate_outcome(
+                sample_plan_record.id, f"task_{i}", "sibling_read",
+                caught_issue=(i < 5), changed_code=(i < 3), detail="test",
+            )
+        recs = recommend_gates(store, min_samples=20, threshold=0.10)
+        assert len(recs) == 0
+
+    def test_custom_threshold(self, store, sample_plan_record):
+        """Custom threshold is respected."""
+        store.save_plan(sample_plan_record)
+        for i in range(30):
+            store.record_gate_outcome(
+                sample_plan_record.id, f"task_{i}", "fdmc_review",
+                caught_issue=(i < 6), changed_code=False, detail="test",
+            )
+        # 20% hit rate — above 10% threshold, not recommended
+        assert recommend_gates(store, min_samples=20, threshold=0.10) == []
+        # 20% hit rate — below 25% threshold, recommended
+        recs = recommend_gates(store, min_samples=20, threshold=0.25)
+        assert len(recs) == 1
+
+    def test_recommendations_attached_to_check(self, store, sample_plan_record):
+        """CHECK advance includes recommendations when data exists."""
+        store.save_plan(sample_plan_record)
+        # Seed enough low-ROI gate data
+        for i in range(25):
+            store.record_gate_outcome(
+                sample_plan_record.id, f"old_task_{i}", "seraph_assess",
+                caught_issue=False, changed_code=False, detail="noop",
+            )
+        task = TaskRecord(plan_id=sample_plan_record.id, seq=1, title="T1")
+        store.save_task(task)
+
+        result, _ = advance(store, task.id, Phase.CHECK, {})
+        assert result.passed is True
+        assert "Recommended skips" in result.message
+        assert "seraph_assess" in result.message

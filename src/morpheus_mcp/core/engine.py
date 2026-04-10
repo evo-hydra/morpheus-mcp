@@ -634,6 +634,21 @@ def advance(
     elif phase == Phase.ADVANCE:
         store.update_task_status(full_id, TaskStatus.DONE)
 
+    # Attach gate recommendations on CHECK pass (so the agent knows upfront)
+    recommended_skips: list[dict[str, str]] = []
+    if phase == Phase.CHECK:
+        recommended_skips = recommend_gates(store)
+
+    # Return result with optional recommendations
+    if recommended_skips:
+        skip_lines = "; ".join(
+            f"{r['gate']} ({r['recommendation']})" for r in recommended_skips
+        )
+        result = GateResult(
+            passed=True,
+            message=f"Gate passed. Recommended skips: {skip_lines}",
+        )
+
     return result, completed
 
 
@@ -708,3 +723,41 @@ def close_plan(store: MorpheusStore, plan_id: str) -> PlanRecord | None:
 
     store.update_plan_status(plan_id, PlanStatus.COMPLETED)
     return store.get_plan(plan_id)
+
+
+_LOW_ROI_THRESHOLD = 0.10  # 10% hit rate
+_MIN_SAMPLES = 20  # Need at least 20 samples before recommending
+
+
+def recommend_gates(
+    store: MorpheusStore,
+    min_samples: int = _MIN_SAMPLES,
+    threshold: float = _LOW_ROI_THRESHOLD,
+) -> list[dict[str, str]]:
+    """Recommend gates to skip based on historical hit rates.
+
+    Reads the gate_outcomes table across all plans. For gates with
+    enough data (min_samples) and low hit rates (below threshold),
+    returns a recommendation to skip.
+
+    Conservative: only recommends skipping, never adding.
+
+    Returns:
+        List of dicts with keys: gate, hit_rate, fired, recommendation.
+    """
+    summary = store.get_gate_summary()
+    recommendations: list[dict[str, str]] = []
+    for row in summary:
+        fired = row["fired"]
+        caught = row["caught"]
+        if fired < min_samples:
+            continue
+        hit_rate = caught / fired if fired > 0 else 0.0
+        if hit_rate < threshold:
+            recommendations.append({
+                "gate": row["gate"],
+                "hit_rate": f"{hit_rate:.1%}",
+                "fired": str(fired),
+                "recommendation": f"skip — low historical ROI ({hit_rate:.1%} hit rate over {fired} tasks)",
+            })
+    return recommendations
