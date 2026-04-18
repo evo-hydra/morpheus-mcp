@@ -39,7 +39,10 @@ def _self_test(db_path: str) -> bool:
             store.save_task(task)
 
             # Exercise advance() — the codepath that crashes on bad data
-            result, _ = advance(store, test_task_id, Phase.CHECK, {})
+            result, _ = advance(
+                store, test_task_id, Phase.CHECK,
+                {"summary": "self-test: exercise advance() codepath with minimum viable evidence"},
+            )
 
             # Clean up
             store.conn.execute("DELETE FROM phases WHERE task_id = ?", (test_task_id,))
@@ -355,7 +358,7 @@ def create_server(config=None):
         Args:
             plan_id: The plan ID
             task_id: The task ID
-            gate: Gate name (e.g., "sibling_read", "fdmc_review", "seraph_assess", "knowledge_gate")
+            gate: Gate name (e.g., "sibling_read", "quality_review", "seraph_assess", "knowledge_gate")
             caught_issue: True if the gate found something actionable
             changed_code: True if code was modified because of this gate
             detail: Brief description of what happened (e.g., "matched singleton pattern from sibling" or "no issues found")

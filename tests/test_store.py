@@ -589,7 +589,7 @@ class TestGateOutcomes:
         store.save_task(task)
 
         outcome_id = store.record_gate_outcome(
-            sample_plan_record.id, task.id, "fdmc_review",
+            sample_plan_record.id, task.id, "quality_review",
             caught_issue=True, detail="4 violations found"
         )
         assert outcome_id is not None

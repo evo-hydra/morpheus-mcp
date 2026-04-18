@@ -18,7 +18,12 @@ from morpheus_mcp.models.plan import PhaseRecord, PlanRecord, TaskRecord
 # CHECK has no gate (it's the entry point).
 # Each value is a dict of {evidence_key: description} that must be present.
 GATES: dict[Phase, dict[str, str]] = {
-    Phase.CHECK: {},
+    Phase.CHECK: {
+        "summary": (
+            "Substantive description of scope + approach (min 40 chars). "
+            "Or set 'status': 'pre_implemented' for verify mode."
+        ),
+    },
     Phase.CODE: {
         "sibling_read": "Path to sibling file read, or 'N/A' for greenfield",
     },
@@ -27,7 +32,10 @@ GATES: dict[Phase, dict[str, str]] = {
     },
     Phase.GRADE: {
         "tests_passed": "Test output summary or skip reason",
-        "fdmc_review": "FDMC lens one-liner: what you checked or fixed post-code",
+        "quality_review": (
+            "Quality-lens one-liner: <Label> — <reason referencing a specific file>. "
+            "Label may be from any quality framework (FDMC letter, CLAMP letter, SOLID, etc.)."
+        ),
     },
     Phase.COMMIT: {
         "seraph_id": "Seraph assessment ID, 'grade_disabled', or 'seraph_unavailable'",
@@ -43,9 +51,10 @@ GATES: dict[Phase, dict[str, str]] = {
 # Example evidence for each gated phase — shown in rejection messages so agents
 # know the exact format expected, rather than guessing from key names alone.
 GATE_EXAMPLES: dict[Phase, str] = {
+    Phase.CHECK: '{"summary": "Build X by extending Y, matching Z pattern. Reviewed A.py and B.md for context."}',
     Phase.CODE: '{"sibling_read": "src/core/parser.py"}',
     Phase.TEST: '{"build_verified": "python -m py_compile src/main.py — OK"}',
-    Phase.GRADE: '{"tests_passed": "12 passed, 0 failed", "fdmc_review": "Consistent — matched existing pattern"}',
+    Phase.GRADE: '{"tests_passed": "12 passed, 0 failed", "quality_review": "Consistent — matched existing pattern in auth.py"}',
     Phase.COMMIT: '{"seraph_id": "a1b2c3d4"} or {"seraph_id": "seraph_unavailable"}',
     Phase.ADVANCE: '{"knowledge_gate": "nothing_surprised", "knowledge_reason": "followed established pattern from Task 1"}',
 }
@@ -60,7 +69,7 @@ _VERIFY_PHASE_ORDER = [Phase.CHECK, Phase.TEST, Phase.ADVANCE]
 _PHASE_TO_GATE: dict[Phase, str] = {
     Phase.CODE: "sibling_read",
     Phase.TEST: "build_verified",
-    Phase.GRADE: "fdmc_review",
+    Phase.GRADE: "quality_review",
     Phase.COMMIT: "seraph_assess",
     Phase.ADVANCE: "knowledge_gate",
 }
@@ -112,8 +121,6 @@ AdvanceResult = tuple[GateResult, PhaseRecord | None]
 
 _BARE_ASSERTIONS = {"yes", "true", "false", "ok", "done", "passed", "n/a"}
 
-_FDMC_LENS_NAMES = {"consistent", "future-proof", "dynamic", "modular"}
-
 # Matches test runner signatures or numeric counts (e.g., "12 passed", "pytest")
 _TEST_OUTPUT_PATTERN = re.compile(
     r"\d+\s*(pass|fail|test|error|skip|ok)|"
@@ -122,6 +129,10 @@ _TEST_OUTPUT_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+# Label separator — accepts em-dash, en-dash, double-hyphen, colon, or single hyphen with spaces
+_LABEL_SEPARATOR_PATTERN = re.compile(r"\s[—–\-:]\s|:\s")
+
+_MIN_CHECK_SUMMARY_LEN = 40
 _MIN_KNOWLEDGE_REASON_LEN = 20
 
 
@@ -155,38 +166,68 @@ def _validate_tests_passed(value: str) -> GateResult | None:
     return None
 
 
-def _validate_fdmc_review(value: str) -> GateResult | None:
-    """Require at least one FDMC lens name and a file reference."""
+def _validate_quality_review(value: str) -> GateResult | None:
+    """Require a structural `<Label> <separator> <reason with file>` pattern.
+
+    Lens-agnostic: accepts any quality framework's label (FDMC, CLAMP, SOLID, etc.).
+    Validates structure, not specific lens names. Reason must reference a file.
+    """
     if _is_skipped(value):
         return None
     if value.strip().lower() in _BARE_ASSERTIONS:
         return GateResult(
             passed=False,
             message=(
-                f"fdmc_review='{value}' is a bare assertion. "
-                f"Provide a lens + file reference (e.g., "
+                f"quality_review='{value}' is a bare assertion. "
+                f"Provide a label + reason referencing a file (e.g., "
                 f"'Consistent — re-read auth.ts, matched UserService pattern')."
             ),
         )
-    lower = value.lower()
-    has_lens = any(lens in lower for lens in _FDMC_LENS_NAMES)
-    # File reference: look for path-like strings (word.ext or word/word)
-    has_file = bool(re.search(r"\w+\.\w{1,5}\b", value)) or "/" in value
-    if not has_lens:
+    # Structural check: label separator must exist (label followed by — or : and reason)
+    if not _LABEL_SEPARATOR_PATTERN.search(value):
         return GateResult(
             passed=False,
             message=(
-                f"fdmc_review must cite at least one FDMC lens "
-                f"(Consistent, Future-Proof, Dynamic, Modular). "
+                f"quality_review must use the format '<Label> — <reason>' "
+                f"(separator: em-dash, colon, or hyphen with spaces). "
+                f"Label may be any quality-framework label (FDMC, CLAMP, SOLID, custom). "
                 f"Got: '{value[:80]}'"
             ),
         )
+    # File reference: look for path-like strings (word.ext or word/word)
+    has_file = bool(re.search(r"\w+\.\w{1,5}\b", value)) or "/" in value
     if not has_file:
         return GateResult(
             passed=False,
             message=(
-                f"fdmc_review must reference at least one specific file. "
+                f"quality_review must reference at least one specific file. "
                 f"Got: '{value[:80]}'"
+            ),
+        )
+    return None
+
+
+def _validate_check_summary(value: str) -> GateResult | None:
+    """Reject bare assertions and require substantive CHECK summaries."""
+    if _is_skipped(value):
+        return None
+    stripped = value.strip()
+    if stripped.lower() in _BARE_ASSERTIONS:
+        return GateResult(
+            passed=False,
+            message=(
+                f"CHECK summary='{value}' is a bare assertion, not scope/approach. "
+                f"Describe what you're about to build and how. "
+                f"Minimum {_MIN_CHECK_SUMMARY_LEN} chars."
+            ),
+        )
+    if len(stripped) < _MIN_CHECK_SUMMARY_LEN:
+        return GateResult(
+            passed=False,
+            message=(
+                f"CHECK summary too short ({len(stripped)} chars, "
+                f"minimum {_MIN_CHECK_SUMMARY_LEN}). Describe scope + approach "
+                f"substantively — not a one-word acknowledgment."
             ),
         )
     return None
@@ -258,13 +299,37 @@ def validate_evidence(
         GateResult with passed=True if gate is satisfied, or
         passed=False with a message explaining what's missing.
     """
-    required = GATES.get(phase, {})
-    if not required:
-        return GateResult(passed=True, message="No gate for this phase")
-
     # MICRO tasks: all gates accept empty evidence — zero ceremony
     if task_size == TaskSize.MICRO:
         return GateResult(passed=True, message="MICRO task — gate skipped")
+
+    # CHECK phase: handle upfront because it has special semantics
+    # (verify-mode bypass, SMALL-task bypass, otherwise substantive summary required)
+    if phase == Phase.CHECK:
+        if evidence.get("status") == "pre_implemented":
+            return GateResult(passed=True, message="CHECK verify mode (pre-implemented)")
+        if task_size == TaskSize.SMALL:
+            return GateResult(passed=True, message="CHECK gate — SMALL task bypass")
+        summary = evidence.get("summary", "")
+        if not summary or not str(summary).strip():
+            example = GATE_EXAMPLES.get(Phase.CHECK, "")
+            return GateResult(
+                passed=False,
+                message=(
+                    "CHECK requires 'summary' evidence describing scope + approach "
+                    "substantively — not a one-word acknowledgment. "
+                    "Or set 'status': 'pre_implemented' for verify mode.\n\n"
+                    f"Expected format: {example}"
+                ),
+            )
+        check_result = _validate_check_summary(str(summary))
+        if check_result is not None:
+            return check_result
+        return GateResult(passed=True, message="CHECK gate passed")
+
+    required = GATES.get(phase, {})
+    if not required:
+        return GateResult(passed=True, message="No gate for this phase")
 
     # Backward compat: if old fdmc_preflight is provided, extract sibling_read
     if phase == Phase.CODE and "fdmc_preflight" in evidence and "sibling_read" not in evidence:
@@ -286,13 +351,13 @@ def validate_evidence(
 
     missing: list[str] = []
     for key, description in required.items():
-        # SMALL tasks: skip sibling_read, build_verified, fdmc_review, seraph_id, knowledge_gate
+        # SMALL tasks: skip sibling_read, build_verified, quality_review, seraph_id, knowledge_gate
         if task_size == TaskSize.SMALL:
             if phase == Phase.CODE and key == "sibling_read":
                 continue
             if phase == Phase.TEST and key == "build_verified":
                 continue
-            if phase == Phase.GRADE and key == "fdmc_review":
+            if phase == Phase.GRADE and key == "quality_review":
                 continue
             if phase == Phase.COMMIT and key == "seraph_id":
                 continue
@@ -403,11 +468,17 @@ def validate_evidence(
             if tp_result is not None:
                 return tp_result
 
-        # fdmc_review content check
-        if phase == Phase.GRADE and "fdmc_review" in evidence:
-            fdmc_result = _validate_fdmc_review(evidence["fdmc_review"])
-            if fdmc_result is not None:
-                return fdmc_result
+        # quality_review content check
+        if phase == Phase.GRADE and "quality_review" in evidence:
+            qr_result = _validate_quality_review(evidence["quality_review"])
+            if qr_result is not None:
+                return qr_result
+
+        # Backward compat: accept legacy fdmc_review field, validate with same logic
+        if phase == Phase.GRADE and "fdmc_review" in evidence and "quality_review" not in evidence:
+            qr_result = _validate_quality_review(evidence["fdmc_review"])
+            if qr_result is not None:
+                return qr_result
 
     return GateResult(passed=True, message="Gate passed")
 
@@ -639,14 +710,14 @@ def advance(
     if phase == Phase.CHECK:
         recommended_skips = recommend_gates(store)
 
-    # Return result with optional recommendations
+    # Return result with historical ROI data (informational, never directive)
     if recommended_skips:
-        skip_lines = "; ".join(
+        stat_lines = "; ".join(
             f"{r['gate']} ({r['recommendation']})" for r in recommended_skips
         )
         result = GateResult(
             passed=True,
-            message=f"Gate passed. Recommended skips: {skip_lines}",
+            message=f"Gate passed. Historical gate ROI (informational): {stat_lines}",
         )
 
     return result, completed
@@ -758,6 +829,9 @@ def recommend_gates(
                 "gate": row["gate"],
                 "hit_rate": f"{hit_rate:.1%}",
                 "fired": str(fired),
-                "recommendation": f"skip — low historical ROI ({hit_rate:.1%} hit rate over {fired} tasks)",
+                "recommendation": (
+                    f"low historical ROI — {hit_rate:.1%} hit rate over {fired} tasks "
+                    f"(informational; gate continues to enforce)"
+                ),
             })
     return recommendations

@@ -47,7 +47,7 @@ class TaskSize(str, Enum):
     """Size tier for a task — controls gate strictness.
 
     MICRO: do → test → commit. All gates accept empty evidence.
-    SMALL: Lightweight path — skips sibling_read, fdmc_review, seraph_id, knowledge_gate.
+    SMALL: Lightweight path — skips sibling_read, quality_review, seraph_id, knowledge_gate.
     MEDIUM: Full protocol (default).
     LARGE: Full protocol + mandatory Seraph grading even when grade=false.
     """

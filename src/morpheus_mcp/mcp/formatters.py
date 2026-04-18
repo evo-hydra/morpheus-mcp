@@ -33,8 +33,12 @@ def format_plan_summary(plan: PlanRecord, tasks: list[TaskRecord]) -> str:
     pct = int(done / total * 100) if total else 0
 
     mode_tag = f" [{plan.mode}]" if plan.mode != "standard" else ""
+    # Surface project in the heading so cross-project bleed is visible at a glance.
+    # When `plumbline_status` is called from one project and returns another's plan,
+    # the heading itself makes the mismatch obvious without line-by-line scanning.
+    project_tag = f" · {plan.project}" if plan.project else ""
     lines = [
-        f"## Plan: {plan.name}{mode_tag}",
+        f"## Plan: {plan.name}{mode_tag}{project_tag}",
         f"**ID:** `{plan.id}`",
         f"**Project:** {plan.project}",
         f"**Progress:** {done}/{total} tasks ({pct}%)",

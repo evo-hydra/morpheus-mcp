@@ -26,13 +26,35 @@ def _code_evidence(sibling: str = "sibling.py") -> dict:
 
 def _grade_evidence(tests: str = "12 passed", fdmc: str = "Consistent — re-read engine.py, matched pattern") -> dict:
     """Build valid GRADE phase evidence."""
-    return {"tests_passed": tests, "fdmc_review": fdmc}
+    return {"tests_passed": tests, "quality_review": fdmc}
 
 
 class TestValidateEvidence:
-    def test_check_no_gate(self):
-        """CHECK phase has no gate requirements."""
+    def test_check_requires_summary_or_verify_mode(self):
+        """CHECK now requires substantive summary OR verify-mode declaration."""
+        r = validate_evidence(Phase.CHECK, {"summary": "test: exercise gate state machine with representative scope"})
+        assert r.passed is True
+
+    def test_check_rejects_empty_evidence(self):
+        """CHECK rejects empty evidence (no summary, no verify-mode status)."""
         r = validate_evidence(Phase.CHECK, {})
+        assert r.passed is False
+        assert "summary" in r.message
+
+    def test_check_rejects_bare_summary(self):
+        """CHECK rejects bare-assertion summary like 'ok'."""
+        r = validate_evidence(Phase.CHECK, {"summary": "ok"})
+        assert r.passed is False
+        assert "bare assertion" in r.message
+
+    def test_check_accepts_verify_mode(self):
+        """CHECK accepts status: pre_implemented for verify mode."""
+        r = validate_evidence(Phase.CHECK, {"status": "pre_implemented"})
+        assert r.passed is True
+
+    def test_check_small_tasks_bypass_summary(self):
+        """SMALL tasks bypass the CHECK summary requirement."""
+        r = validate_evidence(Phase.CHECK, {}, task_size=TaskSize.SMALL)
         assert r.passed is True
 
     def test_code_reject_empty(self):
@@ -80,15 +102,15 @@ class TestValidateEvidence:
         assert r.passed is False
 
     def test_grade_accept(self):
-        """GRADE accepts with tests_passed and fdmc_review."""
+        """GRADE accepts with tests_passed and quality_review."""
         r = validate_evidence(Phase.GRADE, _grade_evidence())
         assert r.passed is True
 
-    def test_grade_reject_missing_fdmc_review(self):
-        """GRADE rejects without fdmc_review."""
+    def test_grade_reject_missing_quality_review(self):
+        """GRADE rejects without quality_review."""
         r = validate_evidence(Phase.GRADE, {"tests_passed": "12 passed"})
         assert r.passed is False
-        assert "fdmc_review" in r.message
+        assert "quality_review" in r.message
 
     def test_commit_reject_no_seraph(self):
         """COMMIT rejects without seraph_id when grade enabled."""
@@ -154,8 +176,8 @@ class TestValidateEvidence:
         r = validate_evidence(Phase.GRADE, {"tests_passed": "12 passed"})
         assert r.passed is False
         assert "You provided: [tests_passed]" in r.message
-        assert "expected keys: [tests_passed, fdmc_review]" in r.message
-        assert "fdmc_review" in r.message
+        assert "expected keys: [tests_passed, quality_review]" in r.message
+        assert "quality_review" in r.message
 
     def test_rejection_shows_none_when_empty(self):
         """Rejection message shows '(none)' when no keys provided."""
@@ -197,7 +219,7 @@ class TestSizeAwareGates:
         assert r.passed is True
 
     def test_small_grade_still_requires_tests_passed(self):
-        """SMALL tasks still require tests_passed (only fdmc_review is skipped)."""
+        """SMALL tasks still require tests_passed (only quality_review is skipped)."""
         r = validate_evidence(Phase.GRADE, {}, task_size=TaskSize.SMALL)
         assert r.passed is False
         assert "tests_passed" in r.message
@@ -278,7 +300,7 @@ class TestSizeAwareGates:
         store.save_task(task)
 
         # Walk through all phases with minimal evidence
-        advance(store, task.id, Phase.CHECK, {})
+        advance(store, task.id, Phase.CHECK, {"summary": "test: exercise gate state machine with representative scope"})
         advance(store, task.id, Phase.CODE, {})  # no sibling_read needed
         advance(store, task.id, Phase.TEST, {})  # no build_verified needed
         advance(store, task.id, Phase.GRADE, {"tests_passed": "ok"})  # only tests_passed
@@ -300,7 +322,7 @@ class TestNoTestCommand:
 
     def test_none_skips_tests_passed(self):
         """test_command=none skips tests_passed in GRADE phase."""
-        r = validate_evidence(Phase.GRADE, {"fdmc_review": "Consistent — read config.py, no issues"}, test_command="none")
+        r = validate_evidence(Phase.GRADE, {"quality_review": "Consistent — read config.py, no issues"}, test_command="none")
         assert r.passed is True
 
     def test_none_case_insensitive(self):
@@ -309,10 +331,10 @@ class TestNoTestCommand:
         assert r.passed is True
 
     def test_none_grade_still_requires_fdmc_for_medium(self):
-        """test_command=none skips tests_passed but MEDIUM still needs fdmc_review."""
+        """test_command=none skips tests_passed but MEDIUM still needs quality_review."""
         r = validate_evidence(Phase.GRADE, {}, test_command="none")
         assert r.passed is False
-        assert "fdmc_review" in r.message
+        assert "quality_review" in r.message
 
     def test_none_grade_small_skips_everything(self):
         """SMALL + test_command=none: GRADE has zero required evidence."""
@@ -337,11 +359,11 @@ class TestNoTestCommand:
         store.save_task(task)
         store.update_plan_status(plan.id, PlanStatus.ACTIVE)
 
-        advance(store, task.id, Phase.CHECK, {})
+        advance(store, task.id, Phase.CHECK, {"summary": "test: exercise gate state machine with representative scope"})
         advance(store, task.id, Phase.CODE, {"sibling_read": "config.yaml"})
         r_test, _ = advance(store, task.id, Phase.TEST, {})  # no build_verified
         assert r_test.passed is True
-        r_grade, _ = advance(store, task.id, Phase.GRADE, {"fdmc_review": "Consistent — read config.yaml, no issues"})  # no tests_passed
+        r_grade, _ = advance(store, task.id, Phase.GRADE, {"quality_review": "Consistent — read config.yaml, no issues"})  # no tests_passed
         assert r_grade.passed is True
         advance(store, task.id, Phase.COMMIT, {"seraph_id": "abc"})
         advance(store, task.id, Phase.ADVANCE, {"knowledge_gate": "true"})
@@ -401,7 +423,7 @@ class TestGreenfieldMode:
                 "modular": "ok",
             })
         }
-        advance(store, task.id, Phase.CHECK, {})
+        advance(store, task.id, Phase.CHECK, {"summary": "test: exercise gate state machine with representative scope"})
         result, _ = advance(store, task.id, Phase.CODE, evidence_code)
         assert result.passed is True
 
@@ -425,7 +447,7 @@ class TestAdvance:
         store.save_plan(sample_plan_record)
         task = TaskRecord(plan_id=sample_plan_record.id, seq=1, title="T1")
         store.save_task(task)
-        result, phase = advance(store, task.id, Phase.CHECK, {})
+        result, phase = advance(store, task.id, Phase.CHECK, {"summary": "test: exercise gate state machine with representative scope"})
         assert result.passed is True
         assert phase is not None
         assert phase.status == PhaseStatus.COMPLETED
@@ -435,7 +457,7 @@ class TestAdvance:
         store.save_plan(sample_plan_record)
         task = TaskRecord(plan_id=sample_plan_record.id, seq=1, title="T1")
         store.save_task(task)
-        advance(store, task.id, Phase.CHECK, {})
+        advance(store, task.id, Phase.CHECK, {"summary": "test: exercise gate state machine with representative scope"})
         retrieved = store.get_task(task.id)
         assert retrieved.status == TaskStatus.IN_PROGRESS
 
@@ -446,7 +468,7 @@ class TestAdvance:
         store.save_task(task)
 
         # Must complete CHECK first (sequential enforcement)
-        advance(store, task.id, Phase.CHECK, {})
+        advance(store, task.id, Phase.CHECK, {"summary": "test: exercise gate state machine with representative scope"})
 
         result, phase = advance(store, task.id, Phase.CODE, {})
         assert result.passed is False
@@ -465,7 +487,7 @@ class TestAdvance:
         store.save_task(task)
 
         # Walk through all phases sequentially
-        advance(store, task.id, Phase.CHECK, {})
+        advance(store, task.id, Phase.CHECK, {"summary": "test: exercise gate state machine with representative scope"})
         advance(store, task.id, Phase.CODE, _code_evidence())
         advance(store, task.id, Phase.TEST, {"build_verified": "ok"})
         advance(store, task.id, Phase.GRADE, _grade_evidence())
@@ -477,7 +499,7 @@ class TestAdvance:
 
     def test_advance_unknown_task(self, store):
         """Advancing with unknown task_id fails."""
-        result, phase = advance(store, "nonexistent", Phase.CHECK, {})
+        result, phase = advance(store, "nonexistent", Phase.CHECK, {"summary": "test: exercise gate state machine with representative scope"})
         assert result.passed is False
         assert "not found" in result.message
 
@@ -506,7 +528,7 @@ class TestAdvance:
         store.save_task(task)
 
         prefix = task.id[:12]
-        result, phase = advance(store, prefix, Phase.CHECK, {})
+        result, phase = advance(store, prefix, Phase.CHECK, {"summary": "test: exercise gate state machine with representative scope"})
         assert result.passed is True
 
 
@@ -629,7 +651,7 @@ class TestAdaptiveKnowledgeGate:
         task = store.get_tasks(plan.id)[0]
 
         # Walk through all phases
-        advance(store, task.id, Phase.CHECK, {})
+        advance(store, task.id, Phase.CHECK, {"summary": "test: exercise gate state machine with representative scope"})
         advance(store, task.id, Phase.CODE, {"sibling_read": "test.py"})
         advance(store, task.id, Phase.TEST, {"build_verified": "cmake build ok"})
         advance(store, task.id, Phase.GRADE, _grade_evidence())
@@ -648,7 +670,7 @@ class TestSkipReason:
         task = TaskRecord(plan_id=sample_plan_record.id, seq=1, title="T1")
         store.save_task(task)
 
-        advance(store, task.id, Phase.CHECK, {})
+        advance(store, task.id, Phase.CHECK, {"summary": "test: exercise gate state machine with representative scope"})
         result, _ = advance(store, task.id, Phase.CODE, {}, skip_reason="greenfield — no diff")
         assert result.passed is True
 
@@ -663,7 +685,7 @@ class TestSkipReason:
         task = TaskRecord(plan_id=sample_plan_record.id, seq=1, title="T1")
         store.save_task(task)
 
-        result, _ = advance(store, task.id, Phase.CHECK, {}, skip_reason="test")
+        result, _ = advance(store, task.id, Phase.CHECK, {"summary": "test: exercise gate state machine with representative scope"}, skip_reason="test")
         assert result.passed is True
 
     def test_skip_reason_with_advance_function(self, store, sample_plan_record):
@@ -673,7 +695,7 @@ class TestSkipReason:
         store.save_task(task)
 
         # Walk to COMMIT phase
-        advance(store, task.id, Phase.CHECK, {})
+        advance(store, task.id, Phase.CHECK, {"summary": "test: exercise gate state machine with representative scope"})
         advance(store, task.id, Phase.CODE, {"sibling_read": "test.py"})
         advance(store, task.id, Phase.TEST, {"build_verified": "cmake build ok"})
         advance(store, task.id, Phase.GRADE, _grade_evidence())
@@ -699,8 +721,8 @@ class TestBatchAdvance:
         store.save_task(t2)
 
         batch = advance_batch(store, [
-            {"task_id": t1.id, "phase": "CHECK", "evidence": {}},
-            {"task_id": t2.id, "phase": "CHECK", "evidence": {}},
+            {"task_id": t1.id, "phase": "CHECK", "evidence": {"summary": "test: exercise gate state machine with representative scope"}},
+            {"task_id": t2.id, "phase": "CHECK", "evidence": {"summary": "test: exercise gate state machine with representative scope"}},
         ])
         assert len(batch.results) == 2
         assert all(r[2].passed for r in batch.results)
@@ -716,7 +738,7 @@ class TestBatchAdvance:
         # t1 CODE fails (no CHECK done), but t2 CHECK should still succeed
         batch = advance_batch(store, [
             {"task_id": t1.id, "phase": "CODE", "evidence": {}},  # fails
-            {"task_id": t2.id, "phase": "CHECK", "evidence": {}},  # succeeds
+            {"task_id": t2.id, "phase": "CHECK", "evidence": {"summary": "test: exercise gate state machine with representative scope"}},  # succeeds
         ])
         assert len(batch.results) == 2
         assert batch.results[0][2].passed is False
@@ -732,7 +754,7 @@ class TestBatchAdvance:
 
         batch = advance_batch(store, [
             {"task_id": t1.id, "phase": "INVALID", "evidence": {}},
-            {"task_id": t2.id, "phase": "CHECK", "evidence": {}},
+            {"task_id": t2.id, "phase": "CHECK", "evidence": {"summary": "test: exercise gate state machine with representative scope"}},
         ])
         assert len(batch.results) == 2
         assert batch.results[0][2].passed is False
@@ -747,8 +769,8 @@ class TestBatchAdvance:
 
         # Nonexistent task produces error but doesn't crash the batch
         batch = advance_batch(store, [
-            {"task_id": "nonexistent_task_id_xxxxx", "phase": "CHECK", "evidence": {}},
-            {"task_id": t1.id, "phase": "CHECK", "evidence": {}},
+            {"task_id": "nonexistent_task_id_xxxxx", "phase": "CHECK", "evidence": {"summary": "test: exercise gate state machine with representative scope"}},
+            {"task_id": t1.id, "phase": "CHECK", "evidence": {"summary": "test: exercise gate state machine with representative scope"}},
         ])
         assert len(batch.results) == 2
         assert batch.results[0][2].passed is False
@@ -764,7 +786,7 @@ class TestBatchAdvance:
         store.save_task(t1)
 
         batch = advance_batch(store, [
-            {"task_id": t1.id, "phase": "CHECK", "evidence": {}},
+            {"task_id": t1.id, "phase": "CHECK", "evidence": {"summary": "test: exercise gate state machine with representative scope"}},
             {"task_id": t1.id, "phase": "CODE", "evidence": {}},
         ])
         assert len(batch.results) == 2
@@ -830,7 +852,7 @@ class TestOilChangeEnforcement:
         task = TaskRecord(plan_id=plan.id, seq=1, title="Task 1")
         store.save_task(task)
 
-        result, _ = advance(store, task.id, Phase.CHECK, {})
+        result, _ = advance(store, task.id, Phase.CHECK, {"summary": "test: exercise gate state machine with representative scope"})
         assert result.passed is False
         assert "Oil change required" in result.message
 
@@ -845,7 +867,7 @@ class TestOilChangeEnforcement:
         # Clear the flag
         store.set_oil_change_due(plan.id, False)
 
-        result, phase_rec = advance(store, task.id, Phase.CHECK, {})
+        result, phase_rec = advance(store, task.id, Phase.CHECK, {"summary": "test: exercise gate state machine with representative scope"})
         assert result.passed is True
 
     def test_non_first_task_not_gated(self, store):
@@ -858,7 +880,7 @@ class TestOilChangeEnforcement:
         store.save_task(task1)
         store.save_task(task2)
 
-        result, _ = advance(store, task2.id, Phase.CHECK, {})
+        result, _ = advance(store, task2.id, Phase.CHECK, {"summary": "test: exercise gate state machine with representative scope"})
         assert result.passed is True
 
 
@@ -871,7 +893,7 @@ class TestInlineReflect:
         task = TaskRecord(plan_id=sample_plan_record.id, seq=1, title="T1")
         store.save_task(task)
 
-        advance(store, task.id, Phase.CHECK, {})
+        advance(store, task.id, Phase.CHECK, {"summary": "test: exercise gate state machine with representative scope"})
 
         # Advance CODE with inline reflect data
         evidence = {
@@ -896,7 +918,7 @@ class TestInlineReflect:
         task = TaskRecord(plan_id=sample_plan_record.id, seq=1, title="T1")
         store.save_task(task)
 
-        advance(store, task.id, Phase.CHECK, {})
+        advance(store, task.id, Phase.CHECK, {"summary": "test: exercise gate state machine with representative scope"})
 
         evidence = {
             "sibling_read": "src/parser.py",
@@ -919,7 +941,7 @@ class TestInlineReflect:
         task = TaskRecord(plan_id=sample_plan_record.id, seq=1, title="T1")
         store.save_task(task)
 
-        advance(store, task.id, Phase.CHECK, {})
+        advance(store, task.id, Phase.CHECK, {"summary": "test: exercise gate state machine with representative scope"})
         advance(store, task.id, Phase.CODE, {"sibling_read": "x.py"})
 
         summary = store.get_gate_summary(plan_id=sample_plan_record.id)
@@ -1026,7 +1048,7 @@ class TestVerifyMode:
         task = self._make_task(store, sample_plan_record.id)
 
         # CHECK without pre_implemented
-        advance(store, task.id, Phase.CHECK, {})
+        advance(store, task.id, Phase.CHECK, {"summary": "test: exercise gate state machine with representative scope"})
 
         # CODE is required (standard path)
         result, _ = advance(store, task.id, Phase.TEST, {"build_verified": "ok"})
@@ -1055,7 +1077,7 @@ class TestVerifyMode:
         assert r1.passed is True
 
         # Task 2: standard path (CHECK → CODE → TEST → ...)
-        advance(store, t2.id, Phase.CHECK, {})
+        advance(store, t2.id, Phase.CHECK, {"summary": "test: exercise gate state machine with representative scope"})
         r2, _ = advance(store, t2.id, Phase.CODE, _code_evidence())
         assert r2.passed is True
 
@@ -1067,19 +1089,19 @@ class TestEvidenceHardening:
 
     def test_rejects_bare_yes(self):
         """tests_passed='yes' is rejected as a bare assertion."""
-        r = validate_evidence(Phase.GRADE, {"tests_passed": "yes", "fdmc_review": "Consistent — read foo.py"})
+        r = validate_evidence(Phase.GRADE, {"tests_passed": "yes", "quality_review": "Consistent — read foo.py"})
         assert r.passed is False
         assert "bare assertion" in r.message
 
     def test_rejects_bare_true(self):
         """tests_passed='true' is rejected."""
-        r = validate_evidence(Phase.GRADE, {"tests_passed": "true", "fdmc_review": "Consistent — read foo.py"})
+        r = validate_evidence(Phase.GRADE, {"tests_passed": "true", "quality_review": "Consistent — read foo.py"})
         assert r.passed is False
         assert "bare assertion" in r.message
 
     def test_rejects_bare_ok(self):
         """tests_passed='ok' is rejected."""
-        r = validate_evidence(Phase.GRADE, {"tests_passed": "ok", "fdmc_review": "Consistent — read foo.py"})
+        r = validate_evidence(Phase.GRADE, {"tests_passed": "ok", "quality_review": "Consistent — read foo.py"})
         assert r.passed is False
         assert "bare assertion" in r.message
 
@@ -1087,7 +1109,7 @@ class TestEvidenceHardening:
         """tests_passed without recognizable test output is rejected."""
         r = validate_evidence(Phase.GRADE, {
             "tests_passed": "everything looks good",
-            "fdmc_review": "Consistent — read foo.py",
+            "quality_review": "Consistent — read foo.py",
         })
         assert r.passed is False
         assert "recognizable test output" in r.message
@@ -1096,7 +1118,7 @@ class TestEvidenceHardening:
         """tests_passed with numeric counts is accepted."""
         r = validate_evidence(Phase.GRADE, {
             "tests_passed": "38/38 passed",
-            "fdmc_review": "Consistent — read foo.py, no issues",
+            "quality_review": "Consistent — read foo.py, no issues",
         })
         assert r.passed is True
 
@@ -1104,7 +1126,7 @@ class TestEvidenceHardening:
         """tests_passed with pytest runner name is accepted."""
         r = validate_evidence(Phase.GRADE, {
             "tests_passed": "223 passed (pytest)",
-            "fdmc_review": "Consistent — read engine.py, matched pattern",
+            "quality_review": "Consistent — read engine.py, matched pattern",
         })
         assert r.passed is True
 
@@ -1112,7 +1134,7 @@ class TestEvidenceHardening:
         """tests_passed with vitest runner name is accepted."""
         r = validate_evidence(Phase.GRADE, {
             "tests_passed": "12 tests passed (vitest)",
-            "fdmc_review": "Consistent — read foo.ts, ok",
+            "quality_review": "Consistent — read foo.ts, ok",
         })
         assert r.passed is True
 
@@ -1120,7 +1142,7 @@ class TestEvidenceHardening:
         """Skipped tests_passed bypasses content check."""
         r = validate_evidence(Phase.GRADE, {
             "tests_passed": "skipped: no test command",
-            "fdmc_review": "skipped: small task",
+            "quality_review": "skipped: small task",
         })
         assert r.passed is True
 
@@ -1131,48 +1153,48 @@ class TestEvidenceHardening:
         }, task_size=TaskSize.SMALL)
         assert r.passed is True
 
-    # --- fdmc_review ---
+    # --- quality_review ---
 
     def test_fdmc_rejects_bare_ok(self):
-        """fdmc_review='ok' is rejected."""
+        """quality_review='ok' is rejected."""
         r = validate_evidence(Phase.GRADE, {
             "tests_passed": "12 passed (pytest)",
-            "fdmc_review": "ok",
+            "quality_review": "ok",
         })
         assert r.passed is False
         assert "bare assertion" in r.message
 
-    def test_fdmc_rejects_no_lens(self):
-        """fdmc_review without a lens name is rejected."""
+    def test_quality_rejects_no_separator(self):
+        """quality_review without a label separator is rejected."""
         r = validate_evidence(Phase.GRADE, {
             "tests_passed": "12 passed (pytest)",
-            "fdmc_review": "reviewed the code and it looks good",
+            "quality_review": "reviewed the code and it looks good",
         })
         assert r.passed is False
-        assert "FDMC lens" in r.message
+        assert "format" in r.message
 
     def test_fdmc_rejects_no_file(self):
-        """fdmc_review with lens but no file reference is rejected."""
+        """quality_review with lens but no file reference is rejected."""
         r = validate_evidence(Phase.GRADE, {
             "tests_passed": "12 passed (pytest)",
-            "fdmc_review": "Consistent — matched existing pattern",
+            "quality_review": "Consistent — matched existing pattern",
         })
         assert r.passed is False
         assert "file" in r.message.lower()
 
     def test_fdmc_accepts_valid(self):
-        """fdmc_review with lens + file is accepted."""
+        """quality_review with lens + file is accepted."""
         r = validate_evidence(Phase.GRADE, {
             "tests_passed": "12 passed (pytest)",
-            "fdmc_review": "Consistent — re-read auth.ts, matched UserService pattern",
+            "quality_review": "Consistent — re-read auth.ts, matched UserService pattern",
         })
         assert r.passed is True
 
     def test_fdmc_accepts_path_with_slash(self):
-        """fdmc_review with path containing / is accepted."""
+        """quality_review with path containing / is accepted."""
         r = validate_evidence(Phase.GRADE, {
             "tests_passed": "12 passed (pytest)",
-            "fdmc_review": "Future-Proof — re-read src/core/engine, made config optional",
+            "quality_review": "Future-Proof — re-read src/core/engine, made config optional",
         })
         assert r.passed is True
 
@@ -1206,7 +1228,7 @@ class TestEvidenceHardening:
         )
         store.save_task(task)
 
-        advance(store, task.id, Phase.CHECK, {})
+        advance(store, task.id, Phase.CHECK, {"summary": "test: exercise gate state machine with representative scope"})
         result, phase = advance(store, task.id, Phase.CODE, {
             "sibling_read": "src/engine.py",
         })
@@ -1223,7 +1245,7 @@ class TestEvidenceHardening:
         )
         store.save_task(task)
 
-        advance(store, task.id, Phase.CHECK, {})
+        advance(store, task.id, Phase.CHECK, {"summary": "test: exercise gate state machine with representative scope"})
         result, _ = advance(store, task.id, Phase.CODE, {
             "sibling_read": "src/parser.py",
         })
@@ -1238,7 +1260,7 @@ class TestEvidenceHardening:
         )
         store.save_task(task)
 
-        advance(store, task.id, Phase.CHECK, {})
+        advance(store, task.id, Phase.CHECK, {"summary": "test: exercise gate state machine with representative scope"})
         result, _ = advance(store, task.id, Phase.CODE, {"sibling_read": "yes"})
         assert result.passed is False
         assert "bare assertion" in result.message
@@ -1274,7 +1296,8 @@ class TestRecommendGates:
         recs = recommend_gates(store, min_samples=20, threshold=0.10)
         assert len(recs) == 1
         assert recs[0]["gate"] == "seraph_assess"
-        assert "skip" in recs[0]["recommendation"]
+        assert "low historical ROI" in recs[0]["recommendation"]
+        assert "informational" in recs[0]["recommendation"]
 
     def test_high_hit_rate_not_recommended(self, store, sample_plan_record):
         """Gates with >10% hit rate are not recommended for skip."""
@@ -1293,7 +1316,7 @@ class TestRecommendGates:
         store.save_plan(sample_plan_record)
         for i in range(30):
             store.record_gate_outcome(
-                sample_plan_record.id, f"task_{i}", "fdmc_review",
+                sample_plan_record.id, f"task_{i}", "quality_review",
                 caught_issue=(i < 6), changed_code=False, detail="test",
             )
         # 20% hit rate — above 10% threshold, not recommended
@@ -1314,7 +1337,8 @@ class TestRecommendGates:
         task = TaskRecord(plan_id=sample_plan_record.id, seq=1, title="T1")
         store.save_task(task)
 
-        result, _ = advance(store, task.id, Phase.CHECK, {})
+        result, _ = advance(store, task.id, Phase.CHECK, {"summary": "test: exercise gate state machine with representative scope"})
         assert result.passed is True
-        assert "Recommended skips" in result.message
+        assert "Historical gate ROI" in result.message
+        assert "informational" in result.message
         assert "seraph_assess" in result.message

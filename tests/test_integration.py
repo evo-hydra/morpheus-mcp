@@ -42,7 +42,7 @@ def _code_ev(sibling: str = "merovingian/src/config.py") -> dict:
 
 
 def _grade_ev(tests: str = "12 passed", fdmc: str = "Consistent — re-read config.py, matched pattern") -> dict:
-    return {"tests_passed": tests, "fdmc_review": fdmc}
+    return {"tests_passed": tests, "quality_review": fdmc}
 
 
 def test_full_lifecycle(tmp_path, integration_plan):
@@ -67,7 +67,7 @@ def test_full_lifecycle(tmp_path, integration_plan):
         # === TASK 1: Walk through all 6 phases ===
 
         # Phase: CHECK (no gate)
-        result, phase = advance(store, task1.id, Phase.CHECK, {})
+        result, phase = advance(store, task1.id, Phase.CHECK, {"summary": "test: exercise gate state machine with representative scope"})
         assert result.passed is True
 
         # Phase: CODE (requires sibling_read)
@@ -80,7 +80,7 @@ def test_full_lifecycle(tmp_path, integration_plan):
         )
         assert result.passed is True
 
-        # Phase: GRADE (requires tests_passed + fdmc_review)
+        # Phase: GRADE (requires tests_passed + quality_review)
         result, phase = advance(store, task1.id, Phase.GRADE, _grade_ev())
         assert result.passed is True
 
@@ -107,7 +107,7 @@ def test_full_lifecycle(tmp_path, integration_plan):
         assert task2.seq == 2
 
         # Quick advance through task 2
-        advance(store, task2.id, Phase.CHECK, {})
+        advance(store, task2.id, Phase.CHECK, {"summary": "test: exercise gate state machine with representative scope"})
         advance(store, task2.id, Phase.CODE, _code_ev())
         advance(store, task2.id, Phase.TEST, {"build_verified": "ok"})
         advance(store, task2.id, Phase.GRADE, _grade_ev())
@@ -140,7 +140,7 @@ def test_gate_rejection_and_retry(tmp_path, integration_plan):
         task = store.get_next_pending_task(plan.id)
 
         # Advance CHECK
-        advance(store, task.id, Phase.CHECK, {})
+        advance(store, task.id, Phase.CHECK, {"summary": "test: exercise gate state machine with representative scope"})
 
         # Try CODE without sibling_read — should be rejected
         result, phase = advance(store, task.id, Phase.CODE, {})
@@ -177,7 +177,7 @@ def test_grade_disabled_plan(tmp_path):
         init_plan(store, plan, tasks)
         task = store.get_next_pending_task(plan.id)
 
-        advance(store, task.id, Phase.CHECK, {})
+        advance(store, task.id, Phase.CHECK, {"summary": "test: exercise gate state machine with representative scope"})
         advance(store, task.id, Phase.CODE, _code_ev())
         advance(store, task.id, Phase.TEST, {"build_verified": "ok"})
         advance(store, task.id, Phase.GRADE, _grade_ev("1 passed", "Consistent — re-read config.toml, no issues"))
@@ -229,12 +229,12 @@ def test_new_features_integration(tmp_path):
         t1, t2, t3 = store.get_tasks(plan_id)
 
         # === SMALL TASK: minimal evidence path ===
-        advance(store, t1.id, Phase.CHECK, {})
+        advance(store, t1.id, Phase.CHECK, {"summary": "test: exercise gate state machine with representative scope"})
         # CODE: no sibling_read needed (SMALL + greenfield)
         result, _ = advance(store, t1.id, Phase.CODE, {})
         assert result.passed is True
         advance(store, t1.id, Phase.TEST, {"build_verified": "ok"})
-        # GRADE: no fdmc_review needed (SMALL)
+        # GRADE: no quality_review needed (SMALL)
         result, _ = advance(store, t1.id, Phase.GRADE, {"tests_passed": "ok"})
         assert result.passed is True
         # COMMIT: no seraph_id needed (SMALL)
@@ -247,7 +247,7 @@ def test_new_features_integration(tmp_path):
         assert store.get_task(t1.id).status == TaskStatus.DONE
 
         # === MEDIUM TASK: greenfield relaxation ===
-        advance(store, t2.id, Phase.CHECK, {})
+        advance(store, t2.id, Phase.CHECK, {"summary": "test: exercise gate state machine with representative scope"})
         # CODE: no sibling_read needed (greenfield mode)
         result, _ = advance(store, t2.id, Phase.CODE, {})
         assert result.passed is True
@@ -265,7 +265,7 @@ def test_new_features_integration(tmp_path):
         assert store.get_task(t2.id).status == TaskStatus.DONE
 
         # === LARGE TASK: strict path ===
-        advance(store, t3.id, Phase.CHECK, {})
+        advance(store, t3.id, Phase.CHECK, {"summary": "test: exercise gate state machine with representative scope"})
         # CODE: greenfield still means no sibling_read
         result, _ = advance(store, t3.id, Phase.CODE, {})
         assert result.passed is True
@@ -328,7 +328,7 @@ def test_invalid_size_lifecycle(tmp_path):
         store.conn.commit()
 
         # t1 (small, valid) should advance normally
-        advance(store, t1.id, Phase.CHECK, {})
+        advance(store, t1.id, Phase.CHECK, {"summary": "test: exercise gate state machine with representative scope"})
         advance(store, t1.id, Phase.CODE, {})
         advance(store, t1.id, Phase.TEST, {"build_verified": "ok"})
         result, _ = advance(store, t1.id, Phase.GRADE, {"tests_passed": "ok"})
@@ -341,7 +341,7 @@ def test_invalid_size_lifecycle(tmp_path):
         t2_reloaded = store.get_task(t2.id)
         assert t2_reloaded.size == TaskSize.MEDIUM
 
-        advance(store, t2.id, Phase.CHECK, {})
+        advance(store, t2.id, Phase.CHECK, {"summary": "test: exercise gate state machine with representative scope"})
         # Greenfield mode relaxes sibling_read for MEDIUM
         result, _ = advance(store, t2.id, Phase.CODE, {})
         assert result.passed is True
@@ -384,10 +384,10 @@ def test_small_no_test_command_lifecycle(tmp_path):
 
         # Walk all 6 phases with ZERO evidence — no rejections expected
         phases_and_evidence = [
-            (Phase.CHECK, {}),
+            (Phase.CHECK, {"summary": "test: exercise gate state machine with representative scope"}),
             (Phase.CODE, {}),       # SMALL: sibling_read skipped
             (Phase.TEST, {}),       # SMALL: build_verified skipped
-            (Phase.GRADE, {}),      # SMALL: fdmc_review skipped; test_command:none: tests_passed skipped
+            (Phase.GRADE, {}),      # SMALL: quality_review skipped; test_command:none: tests_passed skipped
             (Phase.COMMIT, {}),     # SMALL: seraph_id skipped
             (Phase.ADVANCE, {}),    # SMALL: knowledge_gate skipped
         ]
@@ -433,7 +433,7 @@ def test_medium_no_test_command_lifecycle(tmp_path):
         plan_id = init_plan(store, plan, tasks)
         task = store.get_tasks(plan_id)[0]
 
-        advance(store, task.id, Phase.CHECK, {})
+        advance(store, task.id, Phase.CHECK, {"summary": "test: exercise gate state machine with representative scope"})
 
         # CODE: MEDIUM still requires sibling_read
         result, _ = advance(store, task.id, Phase.CODE, {})
@@ -446,11 +446,11 @@ def test_medium_no_test_command_lifecycle(tmp_path):
         result, _ = advance(store, task.id, Phase.TEST, {})
         assert result.passed is True
 
-        # GRADE: test_command:none skips tests_passed, but MEDIUM still needs fdmc_review
+        # GRADE: test_command:none skips tests_passed, but MEDIUM still needs quality_review
         result, _ = advance(store, task.id, Phase.GRADE, {})
         assert result.passed is False
-        assert "fdmc_review" in result.message
-        result, _ = advance(store, task.id, Phase.GRADE, {"fdmc_review": "Consistent — re-read system.md, matches prompts/old.md pattern"})
+        assert "quality_review" in result.message
+        result, _ = advance(store, task.id, Phase.GRADE, {"quality_review": "Consistent — re-read system.md, matches prompts/old.md pattern"})
         assert result.passed is True
 
         # COMMIT: MEDIUM still requires seraph_id
@@ -521,7 +521,7 @@ def test_oil_change_lifecycle(tmp_path):
         t1, t2 = store.get_tasks(plan_id)
 
         # First task CHECK should be rejected
-        result, _ = advance(store, t1.id, Phase.CHECK, {})
+        result, _ = advance(store, t1.id, Phase.CHECK, {"summary": "test: exercise gate state machine with representative scope"})
         assert result.passed is False
         assert "Oil change required" in result.message
 
@@ -530,7 +530,7 @@ def test_oil_change_lifecycle(tmp_path):
         store.set_oil_change_due(plan_id, False)
 
         # Now first task CHECK should pass
-        result, _ = advance(store, t1.id, Phase.CHECK, {})
+        result, _ = advance(store, t1.id, Phase.CHECK, {"summary": "test: exercise gate state machine with representative scope"})
         assert result.passed is True
 
         # Complete t1
@@ -542,7 +542,7 @@ def test_oil_change_lifecycle(tmp_path):
         assert store.get_task(t1.id).status == TaskStatus.DONE
 
         # Second task should not be gated
-        result, _ = advance(store, t2.id, Phase.CHECK, {})
+        result, _ = advance(store, t2.id, Phase.CHECK, {"summary": "test: exercise gate state machine with representative scope"})
         assert result.passed is True
 
         # Verify oil_changes table has both records

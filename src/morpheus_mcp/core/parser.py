@@ -12,8 +12,25 @@ from morpheus_mcp.models.plan import PlanRecord, TaskRecord
 # Frontmatter: content between --- markers at the top of the file
 _FRONTMATTER_RE = re.compile(r"\A\s*---\s*\n(.*?)\n---\s*\n", re.DOTALL)
 
-# Task heading: ## N. Title (with optional whitespace variations)
+# Task heading — primary format: `## N. Title`
 _TASK_HEADING_RE = re.compile(r"^##\s+(\d+)\.\s+(.+)$", re.MULTILINE)
+
+# Task heading — alternate format: `### Task N[.N] — Title` / `### Task N[.N] - Title`
+# Accepts em-dash (—), en-dash (–), or plain hyphen (-) as separator.
+# The N.N portion is decorative; actual seq is assigned by position in file.
+_TASK_HEADING_ALT_RE = re.compile(
+    r"^###\s+Task\s+\d+(?:\.\d+)?\s*[—–-]\s*(.+)$",
+    re.MULTILINE,
+)
+
+_EXPECTED_FORMATS_MSG = (
+    "Expected one of:\n"
+    "  (A) Primary:   `## N. Title` with `- **files**: ...`, `- **do**: ...`, "
+    "`- **done-when**: ...`, `- **status**: ...` fields.\n"
+    "  (B) Alternate: `### Task N[.N] — Title` (em-dash, en-dash, or hyphen). "
+    "The N.N decoration is optional; position determines order.\n"
+    "See any existing plan in morpheus-mcp/plans/ for a working example."
+)
 
 # Field extraction: - **key**: value
 _FIELD_RE = re.compile(r"^-\s+\*\*(\S+?)\*\*:\s*(.+)$", re.MULTILINE)
@@ -97,15 +114,26 @@ def parse_plan_file(path: str | Path) -> tuple[PlanRecord, list[TaskRecord]]:
         status=PlanStatus.PENDING,
     )
 
-    # Split into task sections by ## headings
+    # Split into task sections — try primary format first, then alternate
     headings = list(_TASK_HEADING_RE.finditer(text))
+    heading_style = "primary"
     if not headings:
-        raise ValueError(f"No task sections found in {path}")
+        headings = list(_TASK_HEADING_ALT_RE.finditer(text))
+        heading_style = "alternate"
+    if not headings:
+        raise ValueError(
+            f"No task sections found in {path}.\n\n{_EXPECTED_FORMATS_MSG}"
+        )
 
     tasks: list[TaskRecord] = []
     for i, heading in enumerate(headings):
-        seq = int(heading.group(1))
-        title = heading.group(2).strip()
+        if heading_style == "primary":
+            seq = int(heading.group(1))
+            title = heading.group(2).strip()
+        else:
+            # Alternate format: `### Task N[.N] — Title` — use position as seq
+            seq = i + 1
+            title = heading.group(1).strip()
 
         # Section body extends from after heading to next heading (or end)
         start = heading.end()

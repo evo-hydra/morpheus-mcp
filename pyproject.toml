@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "morpheus-mcp"
-version = "0.3.0"
+version = "0.3.1"
 description = "Plan state management and phase gate enforcement for AI dev loops via MCP"
 readme = "README.md"
 license = {text = "MIT"}
@@ -48,6 +48,32 @@ morpheus-mcp = "morpheus_mcp.mcp.server:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/morpheus_mcp"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "src/morpheus_mcp",
+    "tests",
+    "README.md",
+    "LICENSE",
+    "pyproject.toml",
+]
+exclude = [
+    "/.plan_file",
+    "/plans",
+    "/.env",
+    "/.venv",
+    "/dist",
+    "/build",
+    "/.pytest_cache",
+    "/.ruff_cache",
+    "/.mypy_cache",
+    "/.niobe",
+    "/.sentinel",
+    "/.seraph",
+    "/.coverage",
+    "**/__pycache__",
+    "**/.DS_Store",
+]
 
 [tool.ruff]
 target-version = "py310"

@@ -124,8 +124,11 @@ class TestSkipReasonMCP:
                 task_id = line.split("`")[1]
                 break
 
-        # CHECK — no gate
-        server._tool_manager._tools["morpheus_advance"].fn(task_id, "CHECK")
+        # CHECK — substantive summary required by v0.3.1+
+        server._tool_manager._tools["morpheus_advance"].fn(
+            task_id, "CHECK",
+            '{"summary": "test: exercise gate state machine with representative scope"}',
+        )
         # CODE — skip_reason instead of sibling_read
         result = server._tool_manager._tools["morpheus_advance"].fn(
             task_id, "CODE", "{}", "no siblings in greenfield project",
@@ -292,7 +295,7 @@ class TestMorpheusGateSummary:
 
         # Advance through CHECK then CODE with inline reflect data
         advance = server._tool_manager._tools["morpheus_advance"].fn
-        advance(task_id, "CHECK", "{}")
+        advance(task_id, "CHECK", '{"summary": "test: exercise gate state machine with representative scope"}')
         advance(task_id, "CODE", json.dumps({
             "sibling_read": "src/sibling.py",
             "reflect_caught_issue": True,
@@ -311,7 +314,7 @@ class TestMorpheusGateSummary:
 
         # Advance with inline reflect to generate gate outcome
         advance = server._tool_manager._tools["morpheus_advance"].fn
-        advance(task_id, "CHECK", "{}")
+        advance(task_id, "CHECK", '{"summary": "test: exercise gate state machine with representative scope"}')
         advance(task_id, "CODE", json.dumps({
             "sibling_read": "src/sibling.py",
             "reflect_caught_issue": True,
