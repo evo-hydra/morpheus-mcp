@@ -288,6 +288,69 @@ class TestDefensiveParsing:
         assert retrieved is not None
         assert retrieved.status == PlanStatus.ACTIVE
 
+    def test_get_plan_handles_legacy_column_order(self, tmp_path):
+        """get_plan must read fields by name, not by SELECT * row index.
+
+        Live DBs created by older schema versions had columns in order:
+        (..., status, created_at, closed_at, mode, oil_change_due) — mode and
+        oil_change_due appended via ALTER TABLE. The current CREATE TABLE
+        orders them (..., mode, status, oil_change_due, created_at, closed_at).
+        SELECT * returns columns in the table's actual definition order, so
+        a legacy DB read with positional indexing shifts every field.
+        """
+        db_path = tmp_path / "legacy_plan_columns.db"
+        import sqlite3 as _sql
+
+        conn = _sql.connect(str(db_path))
+        # Older column order: mode + oil_change_due appended at end.
+        conn.executescript("""
+            CREATE TABLE morpheus_meta (key TEXT PRIMARY KEY, value TEXT);
+            INSERT INTO morpheus_meta(key, value) VALUES ('schema_version', '6');
+            CREATE TABLE plans (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                project TEXT NOT NULL DEFAULT '',
+                test_command TEXT NOT NULL DEFAULT '',
+                grade_enabled INTEGER NOT NULL DEFAULT 1,
+                status TEXT NOT NULL DEFAULT 'pending',
+                created_at TEXT NOT NULL,
+                closed_at TEXT,
+                mode TEXT NOT NULL DEFAULT 'standard',
+                oil_change_due INTEGER NOT NULL DEFAULT 0
+            );
+            INSERT INTO plans
+                (id, name, project, test_command, grade_enabled, status,
+                 created_at, closed_at, mode, oil_change_due)
+            VALUES
+                ('p1', 'Legacy Plan', '/tmp', '', 0, 'completed',
+                 '2026-04-01T00:00:00+00:00', '2026-04-02T00:00:00+00:00',
+                 'standard', 0);
+            CREATE TABLE tasks (
+                id TEXT PRIMARY KEY, plan_id TEXT NOT NULL, seq INTEGER NOT NULL,
+                title TEXT NOT NULL, files_json TEXT DEFAULT '[]', do_text TEXT DEFAULT '',
+                done_when TEXT DEFAULT '', status TEXT DEFAULT 'pending',
+                size TEXT, claimed_by TEXT
+            );
+        """)
+        conn.commit()
+        conn.close()
+
+        with MorpheusStore(db_path) as store:
+            plan = store.get_plan("p1")
+            assert plan is not None
+            # The shift bug would put 'completed' (status) into mode and the
+            # date string into status — both must read correctly.
+            assert plan.status == PlanStatus.COMPLETED
+            assert plan.mode == "standard"
+            assert plan.closed_at is not None
+            assert plan.closed_at.year == 2026 and plan.closed_at.month == 4
+
+            # list_plans uses the same code path — must also read correctly.
+            plans = store.list_plans()
+            assert len(plans) == 1
+            assert plans[0].status == PlanStatus.COMPLETED
+            assert plans[0].closed_at is not None
+
     def test_null_size_in_get_tasks_list(self, tmp_path):
         """get_tasks() handles NULL size across multiple rows."""
         db_path = tmp_path / "legacy_list.db"

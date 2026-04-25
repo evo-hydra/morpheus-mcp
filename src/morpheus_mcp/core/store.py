@@ -327,9 +327,16 @@ class MorpheusStore:
         )
         self.conn.commit()
 
+    _PLAN_COLUMNS = (
+        "id, name, project, test_command, grade_enabled, mode, status, "
+        "oil_change_due, created_at, closed_at"
+    )
+
     def get_plan(self, plan_id: str) -> PlanRecord | None:
         """Retrieve a plan by ID."""
-        cur = self.conn.execute("SELECT * FROM plans WHERE id = ?", (plan_id,))
+        cur = self.conn.execute(
+            f"SELECT {self._PLAN_COLUMNS} FROM plans WHERE id = ?", (plan_id,)
+        )
         row = cur.fetchone()
         if row is None:
             return None
@@ -350,7 +357,9 @@ class MorpheusStore:
 
     def list_plans(self) -> list[PlanRecord]:
         """List all plans ordered by creation time."""
-        cur = self.conn.execute("SELECT * FROM plans ORDER BY created_at DESC")
+        cur = self.conn.execute(
+            f"SELECT {self._PLAN_COLUMNS} FROM plans ORDER BY created_at DESC"
+        )
         return [self._row_to_plan(row) for row in cur.fetchall()]
 
     # --- Task CRUD ---
