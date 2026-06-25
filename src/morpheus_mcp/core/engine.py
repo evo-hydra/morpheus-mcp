@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from pathlib import PurePosixPath
 from typing import Any
 
+from morpheus_mcp.core.runbooks import find_touched_runbooks
 from morpheus_mcp.core.store import MorpheusStore
 from morpheus_mcp.models.enums import Phase, PhaseStatus, PlanStatus, TaskSize, TaskStatus
 from morpheus_mcp.models.plan import PhaseRecord, PlanRecord, TaskRecord
@@ -270,6 +271,43 @@ def _validate_sibling_read_content(
                     f"sibling read. Read a similar existing file for patterns."
                 ),
             )
+    return None
+
+
+def _validate_runbook_fresh(
+    value: str, reason: str, touched: list[str],
+) -> GateResult | None:
+    """Require runbook_fresh evidence when a task touched covered runbook(s).
+
+    Accepts either a non-empty path/commit (the runbook was updated) or
+    ``no_behavior_change`` paired with a non-empty ``runbook_reason`` — the
+    fast-pass, mirroring the knowledge_gate's reason requirement.
+    """
+    rb_list = ", ".join(touched)
+    # value is always a str (evidence.get default ""), so .strip() covers both
+    # empty and whitespace-only — no redundant `not value` clause needed.
+    if not value.strip():
+        return GateResult(
+            passed=False,
+            message=(
+                f"This task's files are documented by runbook(s): {rb_list}. "
+                f"Provide 'runbook_fresh' evidence before ADVANCE — the updated "
+                f"runbook path/commit, or 'no_behavior_change' with a "
+                f"'runbook_reason'.\n\n"
+                f'Expected format: {{"runbook_fresh": "docs/runbooks/auth.md — '
+                f'updated steps + re-stamped last_verified"}} or '
+                f'{{"runbook_fresh": "no_behavior_change", "runbook_reason": '
+                f'"internal refactor only; user-facing flow unchanged"}}'
+            ),
+        )
+    if value.strip().lower() == "no_behavior_change" and not (reason and reason.strip()):
+        return GateResult(
+            passed=False,
+            message=(
+                f"runbook_fresh='no_behavior_change' requires a 'runbook_reason' "
+                f"explaining why {rb_list} needs no update."
+            ),
+        )
     return None
 
 
@@ -667,6 +705,33 @@ def advance(
             )
             store.save_phase(rejected)
             return sr_result, None
+
+    # Post-validation: runbook freshness (ADVANCE, needs task context).
+    # Fires only when the task's declared files are covered by a runbook —
+    # blocks task completion, never the commit (ADVANCE is after COMMIT).
+    if phase == Phase.ADVANCE and task.size not in (TaskSize.MICRO, TaskSize.SMALL):
+        try:
+            rb_target_files = json.loads(task.files_json) if task.files_json else []
+        except (json.JSONDecodeError, TypeError):
+            rb_target_files = []
+        touched = find_touched_runbooks(
+            rb_target_files, plan.project if plan else "",
+        )
+        if touched:
+            rb_result = _validate_runbook_fresh(
+                evidence.get("runbook_fresh", ""),
+                evidence.get("runbook_reason", ""),
+                touched,
+            )
+            if rb_result is not None:
+                rejected = PhaseRecord(
+                    task_id=full_id,
+                    phase=phase,
+                    status=PhaseStatus.REJECTED,
+                    evidence_json=json.dumps(evidence, default=str),
+                )
+                store.save_phase(rejected)
+                return rb_result, None
 
     # Extract inline reflect data before saving evidence.
     # Agents can embed reflect_caught_issue, reflect_changed_code, and
